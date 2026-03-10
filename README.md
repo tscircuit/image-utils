@@ -8,4 +8,5 @@ use `"sharp"`
 Includes the following libraries:
 
 - `sharp`: `@tscircuit/image-utils/sharp`
+- `resvg`: `@tscircuit/image-utils/resvg`
 - `looks-same`: `@tscircuit/image-utils/looks-same`
