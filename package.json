@@ -1,0 +1,31 @@
+{
+  "name": "@tscircuit/image-utils",
+  "version": "0.0.0",
+  "type": "module",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "main": "dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "test": "bun test",
+    "format": "biome format --write",
+    "build": "tsup-node src --format esm --dts --sourcemap"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./looks-same": "./dist/looks-same.js"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.6",
+    "@types/bun": "^1.3.10",
+    "@types/pngjs": "^6.0.5",
+    "tsup": "^8.5.1",
+    "typescript": "^5.8.2"
+
+  },
+  "dependencies": {
+    "pngjs": "^7.0.0"
+  }
+}
