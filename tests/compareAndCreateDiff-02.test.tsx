@@ -1,5 +1,5 @@
 import React from "react"
-import looksSame from "../src/looks-same"
+import looksSame from "../lib/looks-same"
 import { createCircuitPng } from "./fixtures/create-circuit-png"
 import { it, expect } from "bun:test"
 

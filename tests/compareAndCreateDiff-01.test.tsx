@@ -2,7 +2,7 @@ import { expect, it } from "bun:test"
 import fs from "node:fs/promises"
 import path from "node:path"
 import npmLooksSame from "looks-same"
-import looksSame from "../src/looks-same"
+import looksSame from "../lib/looks-same"
 import { createCircuitPng } from "./fixtures/create-circuit-png"
 
 const SNAPSHOT_OUTPUT_DIR = path.join(process.cwd(), "test", "snapshots")

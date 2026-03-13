@@ -11,7 +11,7 @@
   "scripts": {
     "test": "bun test",
     "format": "biome format --write",
-    "build": "tsup-node src --format esm --dts --sourcemap"
+    "build": "tsup-node lib --format esm --dts --sourcemap"
   },
   "exports": {
     ".": "./dist/index.js",
