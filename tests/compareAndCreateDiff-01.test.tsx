@@ -5,7 +5,7 @@ import npmLooksSame from "looks-same"
 import looksSame from "../lib/looks-same"
 import { createCircuitPng } from "./fixtures/create-circuit-png"
 
-const SNAPSHOT_OUTPUT_DIR = path.join(process.cwd(), "test", "snapshots")
+const SNAPSHOT_OUTPUT_DIR = path.join(process.cwd(), "tests", "snapshots")
 
 const createCircuitPng01 = async () =>
   createCircuitPng(
