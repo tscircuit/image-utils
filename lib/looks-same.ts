@@ -20,6 +20,7 @@ type BaseOptions = {
   ignoreAntialiasing?: boolean
   antialiasingTolerance?: number
   pixelRatio?: number
+  percentThreshold?: number
 }
 
 type LooksSameOptions = BaseOptions
@@ -430,10 +431,25 @@ type PreparedOptions = {
   pixelRatio?: number
 }
 
+type CompareResult = {
+  equal: boolean
+  differentPixels?: number
+  totalPixels?: number
+}
+
 const prepareOptions = (options: BaseOptions = {}): PreparedOptions => {
   if (options.strict && options.tolerance !== undefined) {
     throw new TypeError(
       'Unable to use "strict" and "tolerance" options together',
+    )
+  }
+
+  if (
+    options.percentThreshold !== undefined &&
+    (!Number.isFinite(options.percentThreshold) || options.percentThreshold < 0)
+  ) {
+    throw new TypeError(
+      'Expected "percentThreshold" to be a non-negative number',
     )
   }
 
@@ -481,7 +497,7 @@ const compare = async (
   buffer1: Buffer,
   buffer2: Buffer,
   options: PreparedOptions,
-): Promise<{ equal: boolean }> => {
+): Promise<CompareResult> => {
   const reference = parsePng(buffer1)
   const current = parsePng(buffer2)
 
@@ -489,19 +505,21 @@ const compare = async (
     return { equal: buffer1.equals(buffer2) }
   }
 
-  if (
-    reference.width !== current.width ||
-    reference.height !== current.height
-  ) {
-    return { equal: false }
-  }
-
   const comparator = createComparator(reference, current, options)
-  const width = reference.width
-  const height = reference.height
+  const width = Math.max(reference.width, current.width)
+  const height = Math.max(reference.height, current.height)
+  const minWidth = Math.min(reference.width, current.width)
+  const minHeight = Math.min(reference.height, current.height)
+  const totalPixels = width * height
+  let differentPixels = 0
 
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
+      if (x >= minWidth || y >= minHeight) {
+        differentPixels += 1
+        continue
+      }
+
       const color1 = reference.getPixel(x, y)
       const color2 = current.getPixel(x, y)
       const same =
@@ -515,17 +533,21 @@ const compare = async (
           y,
           width,
           height,
-          minWidth: width,
-          minHeight: height,
+          minWidth,
+          minHeight,
         })
 
       if (!same) {
-        return { equal: false }
+        differentPixels += 1
       }
     }
   }
 
-  return { equal: true }
+  return {
+    equal: differentPixels === 0,
+    differentPixels,
+    totalPixels,
+  }
 }
 
 const looksSameImpl = async (
