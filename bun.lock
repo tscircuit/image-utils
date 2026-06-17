@@ -5,8 +5,11 @@
     "": {
       "name": "@tscircuit/image-utils",
       "dependencies": {
+        "@flatten-js/core": "^1.6.2",
         "color-diff": "^1.4.0",
         "fast-png": "^8.0.0",
+        "svg-path-commander": "^2.1.11",
+        "transformation-matrix": "^2.16.1",
       },
       "devDependencies": {
         "@biomejs/biome": "^2.4.6",
