@@ -1,11 +1,10 @@
-import { readFile, writeFile } from "node:fs/promises"
 import * as colorDiff from "color-diff"
 import { decode, encode } from "fast-png"
 
 const DEFAULT_TOLERANCE = 2.3
 const DEFAULT_HIGHLIGHT = { R: 255, G: 0, B: 255 }
 
-type ImageInput = Buffer | string
+type ImageInput = ArrayBuffer | Uint8Array
 
 type RgbColor = {
   R: number
@@ -28,7 +27,6 @@ type LooksSameOptions = BaseOptions
 type CreateDiffOptions = BaseOptions & {
   reference: ImageInput
   current: ImageInput
-  diff: string
   highlightColor?: string
 }
 
@@ -64,9 +62,9 @@ const areColorsSame = ({
   return color1.R === color2.R && color1.G === color2.G && color1.B === color2.B
 }
 
-const parsePng = (buffer: Buffer): DecodedPng | null => {
+const parsePng = (bytes: Uint8Array): DecodedPng | null => {
   try {
-    const png = decode(buffer)
+    const png = decode(bytes)
 
     if (png.depth !== 8) return null
 
@@ -105,9 +103,19 @@ const parsePng = (buffer: Buffer): DecodedPng | null => {
   }
 }
 
-const getBuffer = async (input: ImageInput) => {
-  if (Buffer.isBuffer(input)) return input
-  return readFile(input)
+const getImageBytes = async (input: ImageInput) => {
+  if (input instanceof Uint8Array) return input
+  return new Uint8Array(input)
+}
+
+const bytesEqual = (bytes1: Uint8Array, bytes2: Uint8Array) => {
+  if (bytes1.byteLength !== bytes2.byteLength) return false
+
+  for (let i = 0; i < bytes1.byteLength; i += 1) {
+    if (bytes1[i] !== bytes2[i]) return false
+  }
+
+  return true
 }
 
 const parseHexColor = (color?: string): RgbColor => {
@@ -494,15 +502,15 @@ const createComparator = (
 }
 
 const compare = async (
-  buffer1: Buffer,
-  buffer2: Buffer,
+  buffer1: Uint8Array,
+  buffer2: Uint8Array,
   options: PreparedOptions,
 ): Promise<CompareResult> => {
   const reference = parsePng(buffer1)
   const current = parsePng(buffer2)
 
   if (!reference || !current) {
-    return { equal: buffer1.equals(buffer2) }
+    return { equal: bytesEqual(buffer1, buffer2) }
   }
 
   const comparator = createComparator(reference, current, options)
@@ -556,8 +564,8 @@ const looksSameImpl = async (
   options: LooksSameOptions = {},
 ) => {
   const prepared = prepareOptions(options)
-  const referenceBuffer = await getBuffer(reference)
-  const currentBuffer = await getBuffer(current)
+  const referenceBuffer = await getImageBytes(reference)
+  const currentBuffer = await getImageBytes(current)
 
   return compare(referenceBuffer, currentBuffer, prepared)
 }
@@ -565,19 +573,17 @@ const looksSameImpl = async (
 const createDiff = async ({
   reference,
   current,
-  diff,
   highlightColor,
   ...options
 }: CreateDiffOptions) => {
   const prepared = prepareOptions(options)
-  const referenceBuffer = await getBuffer(reference)
-  const currentBuffer = await getBuffer(current)
+  const referenceBuffer = await getImageBytes(reference)
+  const currentBuffer = await getImageBytes(current)
   const referencePng = parsePng(referenceBuffer)
   const currentPng = parsePng(currentBuffer)
 
-  if (!(diff.endsWith(".png") && referencePng && currentPng)) {
-    await writeFile(diff, currentBuffer)
-    return
+  if (!(referencePng && currentPng)) {
+    return currentBuffer
   }
 
   const comparator = createComparator(referencePng, currentPng, prepared)
@@ -638,7 +644,7 @@ const createDiff = async ({
     channels: 4,
     depth: 8,
   })
-  await writeFile(diff, Buffer.from(encoded))
+  return encoded
 }
 
 type LooksSame = typeof looksSameImpl & {
