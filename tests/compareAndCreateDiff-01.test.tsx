@@ -35,13 +35,13 @@ it("creates a PNG diff file for different images", async () => {
 
   expect(result.equal).toBe(false)
 
-  await looksSame.createDiff({
+  const diffBuffer = await looksSame.createDiff({
     reference: image1,
     current: image2,
-    diff: diffPath,
     highlightColor: "#ff00ff",
     tolerance: 2,
   })
+  await fs.writeFile(diffPath, diffBuffer)
 
   const npmLooksSameDiffBuffer = await npmLooksSame.createDiff({
     reference: image1,
@@ -50,9 +50,9 @@ it("creates a PNG diff file for different images", async () => {
     tolerance: 2,
   })
 
-  const diffBuffer = await fs.readFile(diffPath)
+  const writtenDiffBuffer = await fs.readFile(diffPath)
   const diffComparison = await npmLooksSame(
-    diffBuffer,
+    writtenDiffBuffer,
     npmLooksSameDiffBuffer,
     {
       strict: false,
@@ -60,7 +60,8 @@ it("creates a PNG diff file for different images", async () => {
     },
   )
 
-  expect(diffBuffer.length).toBeGreaterThan(0)
+  expect(diffBuffer.byteLength).toBeGreaterThan(0)
+  expect(writtenDiffBuffer.length).toBeGreaterThan(0)
   expect(npmLooksSameDiffBuffer.byteLength).toBeGreaterThan(0)
 
   // Compare this library's output with the npm looks-same output
