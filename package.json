@@ -11,11 +11,18 @@
   "scripts": {
     "test": "bun test",
     "format": "biome format --write",
-    "build": "tsup-node index.ts --format esm --dts --sourcemap"
+    "build": "tsup-node --config tsup.config.ts",
+    "prepare": "tsup-node --config tsup.config.ts"
   },
   "exports": {
-    "./looks-same": "./dist/looks-same.js",
-    ".": "./dist/index.js"
+    "./looks-same": {
+      "types": "./dist/looks-same.d.ts",
+      "import": "./dist/looks-same.js"
+    },
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.6",
