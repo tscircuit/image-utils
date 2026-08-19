@@ -1,6 +1,10 @@
 {
   "name": "@tscircuit/image-utils",
   "version": "0.0.9",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tscircuit/image-utils"
+  },
   "type": "module",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
