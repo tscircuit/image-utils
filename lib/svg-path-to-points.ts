@@ -36,9 +36,13 @@ export function svgPathToPoints(
   let currentY = 0
   let subpathStartX = 0
   let subpathStartY = 0
+  let cubicControl: Point | null = null
+  let quadraticControl: Point | null = null
 
   for (const segment of segments) {
     const cmd = segment[0]
+    if (cmd !== "C" && cmd !== "S") cubicControl = null
+    if (cmd !== "Q" && cmd !== "T") quadraticControl = null
 
     switch (cmd) {
       case "M": {
@@ -82,6 +86,7 @@ export function svgPathToPoints(
       }
 
       case "C": {
+        cubicControl = { x: segment[3], y: segment[4] }
         const endX = segment[5]
         const endY = segment[6]
         const segmentPath = `M ${currentX} ${currentY} C ${segment[1]} ${segment[2]} ${segment[3]} ${segment[4]} ${endX} ${endY}`
@@ -95,7 +100,12 @@ export function svgPathToPoints(
       case "S": {
         const endX = segment[3]
         const endY = segment[4]
-        const segmentPath = `M ${currentX} ${currentY} S ${segment[1]} ${segment[2]} ${endX} ${endY}`
+        // S inherits the previous cubic control point, which would be lost in
+        // the isolated path passed to sampleCurveSegment.
+        const controlX = cubicControl ? 2 * currentX - cubicControl.x : currentX
+        const controlY = cubicControl ? 2 * currentY - cubicControl.y : currentY
+        const segmentPath = `M ${currentX} ${currentY} C ${controlX} ${controlY} ${segment[1]} ${segment[2]} ${endX} ${endY}`
+        cubicControl = { x: segment[1], y: segment[2] }
         const sampledPoints = sampleCurveSegment(segmentPath, samplesPerUnit)
         currentPoints.push(...sampledPoints)
         currentX = endX
@@ -104,6 +114,7 @@ export function svgPathToPoints(
       }
 
       case "Q": {
+        quadraticControl = { x: segment[1], y: segment[2] }
         const endX = segment[3]
         const endY = segment[4]
         const segmentPath = `M ${currentX} ${currentY} Q ${segment[1]} ${segment[2]} ${endX} ${endY}`
@@ -117,7 +128,14 @@ export function svgPathToPoints(
       case "T": {
         const endX = segment[1]
         const endY = segment[2]
-        const segmentPath = `M ${currentX} ${currentY} T ${endX} ${endY}`
+        const controlX: number = quadraticControl
+          ? 2 * currentX - quadraticControl.x
+          : currentX
+        const controlY: number = quadraticControl
+          ? 2 * currentY - quadraticControl.y
+          : currentY
+        const segmentPath = `M ${currentX} ${currentY} Q ${controlX} ${controlY} ${endX} ${endY}`
+        quadraticControl = { x: controlX, y: controlY }
         const sampledPoints = sampleCurveSegment(segmentPath, samplesPerUnit)
         currentPoints.push(...sampledPoints)
         currentX = endX
