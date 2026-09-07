@@ -40,7 +40,11 @@ export async function loadImageSource(imageUrl: string): Promise<{
     )
   }
 
-  const responseMimetype = response.headers.get("content-type")?.split(";")[0]
+  const responseMimetype = response.headers
+    .get("content-type")
+    ?.split(";")[0]
+    .trim()
+    .toLowerCase()
   const mimetype =
     responseMimetype && responseMimetype !== "application/octet-stream"
       ? responseMimetype
@@ -186,7 +190,11 @@ function loadDataUrlImageSource(imageUrl: string) {
 }
 
 function getImageMimeTypeFromPath(path: string): string {
-  const lowercasePath = path.toLowerCase()
+  // A base also supports relative URLs accepted by fetch in browser callers.
+  const lowercasePath = new URL(
+    path,
+    "https://image.invalid",
+  ).pathname.toLowerCase()
   if (lowercasePath.endsWith(".svg")) return SVG_MIMETYPE
   if (lowercasePath.endsWith(".png")) return PNG_MIMETYPE
   return "application/octet-stream"
