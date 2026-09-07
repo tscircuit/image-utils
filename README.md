@@ -22,6 +22,8 @@ const diffPng = await looksSame.createDiff({
 ```
 
 Inputs must be PNG bytes represented by an `ArrayBuffer` or `Uint8Array`.
+Grayscale, indexed-color, RGB, and RGBA PNGs are supported. Samples are normalized
+to 8-bit RGB for comparison, including 16-bit and packed 1/2/4-bit inputs.
 `createDiff` returns the generated PNG bytes; callers are responsible for
 writing them to disk when needed.
 
