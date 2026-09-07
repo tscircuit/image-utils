@@ -255,7 +255,7 @@ function getSvgPathDataList(svg: string): string[] {
   const pathTagRegex = /<path\b[^>]*>/gi
 
   for (const pathTag of svg.match(pathTagRegex) ?? []) {
-    const dMatch = pathTag.match(/\bd\s*=\s*(["'])(.*?)\1/i)
+    const dMatch = pathTag.match(/\bd\s*=\s*(["'])(.*?)\1/is)
     if (dMatch?.[2]) pathDataList.push(dMatch[2])
   }
 
