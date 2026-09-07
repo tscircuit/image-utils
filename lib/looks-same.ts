@@ -1,5 +1,5 @@
 import * as colorDiff from "color-diff"
-import { decode, encode } from "fast-png"
+import { convertIndexedToRgb, decode, encode } from "fast-png"
 
 const DEFAULT_TOLERANCE = 2.3
 const DEFAULT_HIGHLIGHT = { R: 255, G: 0, B: 255 }
@@ -66,23 +66,41 @@ const parsePng = (bytes: Uint8Array): DecodedPng | null => {
   try {
     const png = decode(bytes)
 
-    if (png.depth !== 8) return null
-
-    const channels = png.channels
-    const source = png.data
+    const channels = png.palette ? png.palette[0].length : png.channels
+    const source = png.palette ? convertIndexedToRgb(png) : png.data
+    const depth = png.palette ? 8 : png.depth
     const rgba = new Uint8Array(png.width * png.height * 4)
+    const maxSample = 2 ** depth - 1
+    const rowBytes = Math.ceil((png.width * depth) / 8)
 
-    if (channels === 4) {
-      rgba.set(source as Uint8Array)
-    } else if (channels === 3) {
-      for (let i = 0, j = 0; i < source.length; i += 3, j += 4) {
-        rgba[j] = source[i]!
-        rgba[j + 1] = source[i + 1]!
-        rgba[j + 2] = source[i + 2]!
-        rgba[j + 3] = 255
+    const readSample = (pixel: number, channel: number) => {
+      if (depth === 8) return source[pixel * channels + channel]!
+      if (depth >= 8) {
+        return Math.round(
+          (source[pixel * channels + channel]! * 255) / maxSample,
+        )
       }
+      // Sub-byte non-indexed PNGs are grayscale, with padding at each row end.
+      const x = pixel % png.width
+      const y = Math.floor(pixel / png.width)
+      const byte = source[y * rowBytes + Math.floor((x * depth) / 8)]!
+      const shift = 8 - depth - ((x * depth) % 8)
+      return (((byte >> shift) & maxSample) * 255) / maxSample
+    }
+
+    if (depth === 8 && channels === 4) {
+      rgba.set(source as Uint8Array)
     } else {
-      return null
+      for (let pixel = 0; pixel < png.width * png.height; pixel++) {
+        const j = pixel * 4
+        rgba[j] = readSample(pixel, 0)
+        rgba[j + 1] = channels <= 2 ? rgba[j]! : readSample(pixel, 1)
+        rgba[j + 2] = channels <= 2 ? rgba[j]! : readSample(pixel, 2)
+        rgba[j + 3] =
+          channels === 2 || channels === 4
+            ? readSample(pixel, channels - 1)
+            : 255
+      }
     }
 
     return {
