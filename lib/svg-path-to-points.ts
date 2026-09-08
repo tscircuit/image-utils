@@ -86,7 +86,7 @@ export function svgPathToPoints(
         const endY = segment[6]
         const segmentPath = `M ${currentX} ${currentY} C ${segment[1]} ${segment[2]} ${segment[3]} ${segment[4]} ${endX} ${endY}`
         const sampledPoints = sampleCurveSegment(segmentPath, samplesPerUnit)
-        currentPoints.push(...sampledPoints)
+        for (const point of sampledPoints) currentPoints.push(point)
         currentX = endX
         currentY = endY
         break
@@ -97,7 +97,7 @@ export function svgPathToPoints(
         const endY = segment[4]
         const segmentPath = `M ${currentX} ${currentY} S ${segment[1]} ${segment[2]} ${endX} ${endY}`
         const sampledPoints = sampleCurveSegment(segmentPath, samplesPerUnit)
-        currentPoints.push(...sampledPoints)
+        for (const point of sampledPoints) currentPoints.push(point)
         currentX = endX
         currentY = endY
         break
@@ -108,7 +108,7 @@ export function svgPathToPoints(
         const endY = segment[4]
         const segmentPath = `M ${currentX} ${currentY} Q ${segment[1]} ${segment[2]} ${endX} ${endY}`
         const sampledPoints = sampleCurveSegment(segmentPath, samplesPerUnit)
-        currentPoints.push(...sampledPoints)
+        for (const point of sampledPoints) currentPoints.push(point)
         currentX = endX
         currentY = endY
         break
@@ -119,7 +119,7 @@ export function svgPathToPoints(
         const endY = segment[2]
         const segmentPath = `M ${currentX} ${currentY} T ${endX} ${endY}`
         const sampledPoints = sampleCurveSegment(segmentPath, samplesPerUnit)
-        currentPoints.push(...sampledPoints)
+        for (const point of sampledPoints) currentPoints.push(point)
         currentX = endX
         currentY = endY
         break
@@ -130,7 +130,7 @@ export function svgPathToPoints(
         const endY = segment[7]
         const segmentPath = `M ${currentX} ${currentY} A ${segment[1]} ${segment[2]} ${segment[3]} ${segment[4]} ${segment[5]} ${endX} ${endY}`
         const sampledPoints = sampleCurveSegment(segmentPath, samplesPerUnit)
-        currentPoints.push(...sampledPoints)
+        for (const point of sampledPoints) currentPoints.push(point)
         currentX = endX
         currentY = endY
         break
