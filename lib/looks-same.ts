@@ -236,8 +236,8 @@ class AntialiasingComparator {
     const color1 = img1.getPixel(x1, y1)
     const x0 = Math.max(x1 - 1, 0)
     const y0 = Math.max(y1 - 1, 0)
-    const x2 = Math.min(x1 + 1, data.width - 1)
-    const y2 = Math.min(y1 + 1, data.height - 1)
+    const x2 = Math.min(x1 + 1, data.minWidth - 1)
+    const y2 = Math.min(y1 + 1, data.minHeight - 1)
 
     const checkExtremePixels = !img2
     const brightnessTolerance = checkExtremePixels
