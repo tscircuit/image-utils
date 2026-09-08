@@ -1,4 +1,5 @@
 import { Polygon, point as flattenPoint } from "@flatten-js/core"
+import { DOMParser } from "@xmldom/xmldom"
 import { applyToPoint, type Matrix } from "transformation-matrix"
 import { svgPathToPoints, type Point } from "./svg-path-to-points"
 
@@ -252,12 +253,32 @@ function getSvgViewBox(svg: string): {
 
 function getSvgPathDataList(svg: string): string[] {
   const pathDataList: string[] = []
-  const pathTagRegex = /<path\b[^>]*>/gi
+  const document = new DOMParser().parseFromString(svg, SVG_MIMETYPE)
+  const definitionContainers = new Set([
+    "defs",
+    "symbol",
+    "clipPath",
+    "mask",
+    "marker",
+    "pattern",
+    "filter",
+    "metadata",
+    "title",
+    "desc",
+    "style",
+    "script",
+  ])
 
-  for (const pathTag of svg.match(pathTagRegex) ?? []) {
-    const dMatch = pathTag.match(/\bd\s*=\s*(["'])(.*?)\1/i)
-    if (dMatch?.[2]) pathDataList.push(dMatch[2])
+  function visit(element: Element) {
+    if (definitionContainers.has(element.localName)) return
+    if (element.localName === "path") {
+      const pathData = element.getAttribute("d")
+      if (pathData) pathDataList.push(pathData)
+    }
+    for (let child = element.firstChild; child; child = child.nextSibling) {
+      if (child.nodeType === 1) visit(child as Element)
+    }
   }
-
+  if (document.documentElement) visit(document.documentElement)
   return pathDataList
 }
