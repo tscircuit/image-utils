@@ -65,7 +65,13 @@ export function getSvgBRepShapes({
   height: number
   transform: Matrix
 }): BRepShape[] {
-  const rings = getTransformedSvgPathRoutes({ svg, width, height, transform })
+  return getTransformedSvgPathGroups({ svg, width, height, transform }).flatMap(
+    getPathBRepShapes,
+  )
+}
+
+function getPathBRepShapes(routes: Point[][]): BRepShape[] {
+  const rings = routes
     .map(stripClosingPoint)
     .filter((route) => route.length >= 3)
     .map((vertices) => ({
@@ -135,11 +141,25 @@ export function getTransformedSvgPathRoutes({
   height: number
   transform: Matrix
 }): Point[][] {
+  return getTransformedSvgPathGroups({ svg, width, height, transform }).flat()
+}
+
+function getTransformedSvgPathGroups({
+  svg,
+  width,
+  height,
+  transform,
+}: {
+  svg: string
+  width: number
+  height: number
+  transform: Matrix
+}): Point[][][] {
   const viewBox = getSvgViewBox(svg)
   const scaleX = width / viewBox.width
   const scaleY = height / viewBox.height
 
-  return getSvgPathDataList(svg).flatMap((pathData) =>
+  return getSvgPathDataList(svg).map((pathData) =>
     svgPathToPoints(pathData, 0.03).map((pointList) =>
       pointList
         .map((point) =>
