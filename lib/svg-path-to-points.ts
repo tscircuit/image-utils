@@ -126,11 +126,22 @@ export function svgPathToPoints(
       }
 
       case "A": {
+        const rx = segment[1]
+        const ry = segment[2]
         const endX = segment[6]
         const endY = segment[7]
-        const segmentPath = `M ${currentX} ${currentY} A ${segment[1]} ${segment[2]} ${segment[3]} ${segment[4]} ${segment[5]} ${endX} ${endY}`
-        const sampledPoints = sampleCurveSegment(segmentPath, samplesPerUnit)
-        currentPoints.push(...sampledPoints)
+
+        // Per the SVG spec, an elliptical arc with rx = 0 or ry = 0 must be
+        // treated as a straight line to the endpoint. SVGPathCommander
+        // reports a zero total length for such degenerate arcs, which
+        // silently drops the endpoint instead of drawing the line.
+        if (rx === 0 || ry === 0) {
+          currentPoints.push({ x: endX, y: endY })
+        } else {
+          const segmentPath = `M ${currentX} ${currentY} A ${rx} ${ry} ${segment[3]} ${segment[4]} ${segment[5]} ${endX} ${endY}`
+          const sampledPoints = sampleCurveSegment(segmentPath, samplesPerUnit)
+          currentPoints.push(...sampledPoints)
+        }
         currentX = endX
         currentY = endY
         break
