@@ -10,6 +10,7 @@ type RgbColor = {
   R: number
   G: number
   B: number
+  A?: number
 }
 
 type BaseOptions = {
@@ -62,6 +63,9 @@ const areColorsSame = ({
   return color1.R === color2.R && color1.G === color2.G && color1.B === color2.B
 }
 
+const haveSameAlpha = (color1: RgbColor, color2: RgbColor) =>
+  (color1.A ?? 255) === (color2.A ?? 255)
+
 const parsePng = (bytes: Uint8Array): DecodedPng | null => {
   try {
     const png = decode(bytes)
@@ -95,6 +99,7 @@ const parsePng = (bytes: Uint8Array): DecodedPng | null => {
           R: rgba[index]!,
           G: rgba[index + 1]!,
           B: rgba[index + 2]!,
+          A: rgba[index + 3]!,
         }
       },
     }
@@ -531,19 +536,20 @@ const compare = async (
       const color1 = reference.getPixel(x, y)
       const color2 = current.getPixel(x, y)
       const same =
-        areColorsSame({ color1, color2 }) ||
-        comparator({
-          color1,
-          color2,
-          img1: reference,
-          img2: current,
-          x,
-          y,
-          width,
-          height,
-          minWidth,
-          minHeight,
-        })
+        haveSameAlpha(color1, color2) &&
+        (areColorsSame({ color1, color2 }) ||
+          comparator({
+            color1,
+            color2,
+            img1: reference,
+            img2: current,
+            x,
+            y,
+            width,
+            height,
+            minWidth,
+            minHeight,
+          }))
 
       if (!same) {
         differentPixels += 1
@@ -609,19 +615,20 @@ const createDiff = async ({
       const color1 = referencePng.getPixel(x, y)
       const color2 = currentPng.getPixel(x, y)
       const same =
-        areColorsSame({ color1, color2 }) ||
-        comparator({
-          color1,
-          color2,
-          img1: referencePng,
-          img2: currentPng,
-          x,
-          y,
-          width,
-          height,
-          minWidth,
-          minHeight,
-        })
+        haveSameAlpha(color1, color2) &&
+        (areColorsSame({ color1, color2 }) ||
+          comparator({
+            color1,
+            color2,
+            img1: referencePng,
+            img2: currentPng,
+            x,
+            y,
+            width,
+            height,
+            minWidth,
+            minHeight,
+          }))
 
       if (same) {
         diffData[index] = color1.R
