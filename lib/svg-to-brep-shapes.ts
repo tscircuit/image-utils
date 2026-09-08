@@ -232,8 +232,13 @@ function getSvgViewBox(svg: string): {
   width: number
   height: number
 } {
-  const viewBoxMatch = svg.match(/\bviewBox\s*=\s*["']([^"']+)["']/i)
-  const viewBox = viewBoxMatch?.[1]
+  const rootTag = svg.match(/<svg\b(?:[^"'<>]|"[^"]*"|'[^']*')*>/i)?.[0] ?? ""
+  const attributes = new Map<string, string>()
+  for (const match of rootTag.matchAll(/\s([^\s=]+)\s*=\s*(["'])(.*?)\2/gs)) {
+    attributes.set(match[1], match[3])
+  }
+  const viewBox = attributes
+    .get("viewBox")
     ?.trim()
     .split(/[\s,]+/)
     .map(Number)
@@ -247,7 +252,34 @@ function getSvgViewBox(svg: string): {
     }
   }
 
+  const width = getAbsoluteSvgLength(attributes.get("width"))
+  const height = getAbsoluteSvgLength(attributes.get("height"))
+  if (width !== undefined && height !== undefined) {
+    return { x: 0, y: 0, width, height }
+  }
+
   return { x: 0, y: 0, width: 1, height: 1 }
+}
+
+function getAbsoluteSvgLength(value: string | undefined): number | undefined {
+  const match = value
+    ?.trim()
+    .match(
+      /^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)(px|in|cm|mm|pt|pc|q)?$/i,
+    )
+  if (!match) return undefined
+  const pixelsPerUnit: Record<string, number> = {
+    px: 1,
+    in: 96,
+    cm: 96 / 2.54,
+    mm: 96 / 25.4,
+    pt: 96 / 72,
+    pc: 16,
+    q: 96 / 101.6,
+  }
+  const length =
+    Number(match[1]) * pixelsPerUnit[match[2]?.toLowerCase() ?? "px"]
+  return Number.isFinite(length) && length > 0 ? length : undefined
 }
 
 function getSvgPathDataList(svg: string): string[] {
