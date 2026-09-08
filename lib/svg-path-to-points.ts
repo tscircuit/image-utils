@@ -26,7 +26,12 @@ export function svgPathToPoints(
   svgPath: string,
   samplesPerUnit = 10,
 ): Point[][] {
-  const pathCommander = new SVGPathCommander(svgPath)
+  // The parser requires an explicit moveto after closepath.
+  const explicitSubpaths = svgPath.replace(
+    /([zZ])(?=[\t\n\r ]*[LlHhVvCcSsQqTtAa])/g,
+    "$1 m 0 0 ",
+  )
+  const pathCommander = new SVGPathCommander(explicitSubpaths)
   pathCommander.toAbsolute()
   const segments = pathCommander.segments
 
