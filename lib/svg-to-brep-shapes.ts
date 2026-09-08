@@ -71,7 +71,6 @@ export function getSvgBRepShapes({
     .map((vertices) => ({
       vertices,
       polygon: createFlattenPolygon(vertices),
-      samplePoint: getPolygonCentroid(vertices),
     }))
     .map((ring) => ({
       ...ring,
@@ -84,9 +83,7 @@ export function getSvgBRepShapes({
       (candidate) =>
         candidate !== ring &&
         candidate.area > ring.area &&
-        candidate.polygon.contains(
-          flattenPoint(ring.samplePoint.x, ring.samplePoint.y),
-        ),
+        candidate.polygon.contains(ring.polygon),
     ).length
 
     return containingRingCount % 2 === 0
@@ -97,18 +94,15 @@ export function getSvgBRepShapes({
       .filter(
         (ring) =>
           ring !== outerRing &&
+          !outerRings.includes(ring) &&
           ring.area < outerRing.area &&
-          outerRing.polygon.contains(
-            flattenPoint(ring.samplePoint.x, ring.samplePoint.y),
-          ) &&
+          outerRing.polygon.contains(ring.polygon) &&
           !outerRings.some(
             (otherOuterRing) =>
               otherOuterRing !== outerRing &&
               otherOuterRing.area < outerRing.area &&
               otherOuterRing.area > ring.area &&
-              otherOuterRing.polygon.contains(
-                flattenPoint(ring.samplePoint.x, ring.samplePoint.y),
-              ),
+              otherOuterRing.polygon.contains(ring.polygon),
           ),
       )
       .map((ring) => ({
@@ -204,16 +198,6 @@ function stripClosingPoint(points: Point[]) {
 
 function ensureCounterClockwise(points: Point[]) {
   return getFlattenSignedArea(points) < 0 ? [...points].reverse() : points
-}
-
-function getPolygonCentroid(points: Point[]) {
-  let x = 0
-  let y = 0
-  for (const point of points) {
-    x += point.x
-    y += point.y
-  }
-  return { x: x / points.length, y: y / points.length }
 }
 
 function createFlattenPolygon(points: Point[]) {
