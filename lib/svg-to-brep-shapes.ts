@@ -1,4 +1,5 @@
 import { Polygon, point as flattenPoint } from "@flatten-js/core"
+import { DOMParser } from "@xmldom/xmldom"
 import { applyToPoint, type Matrix } from "transformation-matrix"
 import { svgPathToPoints, type Point } from "./svg-path-to-points"
 
@@ -252,12 +253,89 @@ function getSvgViewBox(svg: string): {
 
 function getSvgPathDataList(svg: string): string[] {
   const pathDataList: string[] = []
-  const pathTagRegex = /<path\b[^>]*>/gi
-
-  for (const pathTag of svg.match(pathTagRegex) ?? []) {
-    const dMatch = pathTag.match(/\bd\s*=\s*(["'])(.*?)\1/i)
-    if (dMatch?.[2]) pathDataList.push(dMatch[2])
+  const document = new DOMParser().parseFromString(svg, SVG_MIMETYPE)
+  function visit(element: Element, parentVisibility: string) {
+    const display = getPresentationValue(element, "display")
+    if (display === "none") return
+    const value = getPresentationValue(element, "visibility")
+    const visibility =
+      value === "initial"
+        ? "visible"
+        : !value || value === "inherit" || value === "unset"
+          ? parentVisibility
+          : value
+    if (
+      element.localName === "path" &&
+      visibility !== "hidden" &&
+      visibility !== "collapse"
+    ) {
+      const data = element.getAttribute("d")
+      if (data) pathDataList.push(data)
+    }
+    for (let child = element.firstChild; child; child = child.nextSibling) {
+      if (child.nodeType === 1) visit(child as Element, visibility)
+    }
   }
-
+  if (document.documentElement) visit(document.documentElement, "visible")
   return pathDataList
+}
+
+function getPresentationValue(
+  element: Element,
+  property: "display" | "visibility",
+): string {
+  const allowed = new Set(
+    property === "visibility"
+      ? ["visible", "hidden", "collapse", "inherit", "initial", "unset"]
+      : [
+          "none",
+          "inline",
+          "block",
+          "inline-block",
+          "contents",
+          "list-item",
+          "flex",
+          "inline-flex",
+          "grid",
+          "inline-grid",
+          "table",
+          "inline-table",
+          "table-row",
+          "table-cell",
+          "table-caption",
+          "table-row-group",
+          "table-header-group",
+          "table-footer-group",
+          "table-column",
+          "table-column-group",
+          "flow-root",
+          "inherit",
+          "initial",
+          "unset",
+        ],
+  )
+  let value = element.getAttribute(property)?.trim().toLowerCase() ?? ""
+  let important = false
+  const style = (element.getAttribute("style") ?? "").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  )
+  for (const declaration of style.split(";")) {
+    const colon = declaration.indexOf(":")
+    if (
+      colon < 0 ||
+      declaration.slice(0, colon).trim().toLowerCase() !== property
+    )
+      continue
+    const raw = declaration
+      .slice(colon + 1)
+      .trim()
+      .toLowerCase()
+    const isImportant = /!\s*important\s*$/.test(raw)
+    const next = raw.replace(/!\s*important\s*$/, "").trim()
+    if (!allowed.has(next) || (important && !isImportant)) continue
+    value = next
+    important = isImportant
+  }
+  return value
 }
