@@ -1,5 +1,13 @@
 import { Polygon, point as flattenPoint } from "@flatten-js/core"
-import { applyToPoint, type Matrix } from "transformation-matrix"
+import { DOMParser } from "@xmldom/xmldom"
+import {
+  applyToPoint,
+  compose,
+  fromDefinition,
+  fromTransformAttribute,
+  identity,
+  type Matrix,
+} from "transformation-matrix"
 import { svgPathToPoints, type Point } from "./svg-path-to-points"
 
 export const SVG_MIMETYPE = "image/svg+xml"
@@ -139,9 +147,10 @@ export function getTransformedSvgPathRoutes({
   const scaleX = width / viewBox.width
   const scaleY = height / viewBox.height
 
-  return getSvgPathDataList(svg).flatMap((pathData) =>
+  return getSvgPathDataList(svg).flatMap(({ pathData, elementTransform }) =>
     svgPathToPoints(pathData, 0.03).map((pointList) =>
       pointList
+        .map((point) => applyToPoint(elementTransform, point))
         .map((point) =>
           applyToPoint(transform, {
             x: (point.x - viewBox.x - viewBox.width / 2) * scaleX,
@@ -250,14 +259,32 @@ function getSvgViewBox(svg: string): {
   return { x: 0, y: 0, width: 1, height: 1 }
 }
 
-function getSvgPathDataList(svg: string): string[] {
-  const pathDataList: string[] = []
-  const pathTagRegex = /<path\b[^>]*>/gi
+function getSvgPathDataList(
+  svg: string,
+): Array<{ pathData: string; elementTransform: Matrix }> {
+  const pathDataList: Array<{ pathData: string; elementTransform: Matrix }> = []
+  const document = new DOMParser().parseFromString(svg, SVG_MIMETYPE)
 
-  for (const pathTag of svg.match(pathTagRegex) ?? []) {
-    const dMatch = pathTag.match(/\bd\s*=\s*(["'])(.*?)\1/i)
-    if (dMatch?.[2]) pathDataList.push(dMatch[2])
+  function visit(element: Element, parentTransform: Matrix) {
+    const attribute = element.getAttribute("transform")?.trim()
+    let localTransform = identity()
+    if (attribute) {
+      try {
+        const matrices = fromDefinition(fromTransformAttribute(attribute))
+        if (matrices.length) localTransform = compose(matrices)
+      } catch {
+        // An invalid transform attribute does not invalidate the path geometry.
+      }
+    }
+    const elementTransform = compose(parentTransform, localTransform)
+    if (element.localName === "path") {
+      const pathData = element.getAttribute("d")
+      if (pathData) pathDataList.push({ pathData, elementTransform })
+    }
+    for (let child = element.firstChild; child; child = child.nextSibling) {
+      if (child.nodeType === 1) visit(child as Element, elementTransform)
+    }
   }
-
+  if (document.documentElement) visit(document.documentElement, identity())
   return pathDataList
 }
