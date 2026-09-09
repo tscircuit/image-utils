@@ -294,11 +294,13 @@ function getSvgPathDataList(
   function visit(element: Element, inherited: FillRule) {
     let value = element.getAttribute("fill-rule")?.trim().toLowerCase()
     let important = false
-    for (const declaration of (element.getAttribute("style") ?? "").split(
-      ";",
-    )) {
+    const style = (element.getAttribute("style") ?? "").replace(
+      /\/\*[\s\S]*?\*\//g,
+      " ",
+    )
+    for (const declaration of style.split(";")) {
       const match = declaration.match(
-        /^\s*fill-rule\s*:\s*(nonzero|evenodd|inherit|initial|unset|revert)\s*(!important)?\s*$/i,
+        /^\s*fill-rule\s*:\s*(nonzero|evenodd|inherit|initial|unset|revert)\s*(!\s*important)?\s*$/i,
       )
       if (match && (!important || match[2])) {
         value = match[1].toLowerCase()
