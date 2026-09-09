@@ -1,9 +1,12 @@
 import { Polygon, point as flattenPoint } from "@flatten-js/core"
+import { DOMParser } from "@xmldom/xmldom"
 import { applyToPoint, type Matrix } from "transformation-matrix"
 import { svgPathToPoints, type Point } from "./svg-path-to-points"
 
 export const SVG_MIMETYPE = "image/svg+xml"
 export const PNG_MIMETYPE = "image/png"
+
+type FillRule = "nonzero" | "evenodd"
 
 export interface BRepShape {
   outer_ring: {
@@ -65,7 +68,13 @@ export function getSvgBRepShapes({
   height: number
   transform: Matrix
 }): BRepShape[] {
-  const rings = getTransformedSvgPathRoutes({ svg, width, height, transform })
+  return getTransformedSvgPaths({ svg, width, height, transform }).flatMap(
+    ({ routes, fillRule }) => getPathBRepShapes(routes, fillRule),
+  )
+}
+
+function getPathBRepShapes(routes: Point[][], fillRule: FillRule): BRepShape[] {
+  const rings = routes
     .map(stripClosingPoint)
     .filter((route) => route.length >= 3)
     .map((vertices) => ({
@@ -76,27 +85,37 @@ export function getSvgBRepShapes({
     .map((ring) => ({
       ...ring,
       area: ring.polygon.area(),
+      winding: Math.sign([...ring.polygon.faces][0].signedArea()),
     }))
     .filter((ring) => ring.area > 1e-9)
 
-  const outerRings = rings.filter((ring) => {
-    const containingRingCount = rings.filter(
+  const boundaries = rings.map((ring) => {
+    const containingRings = rings.filter(
       (candidate) =>
         candidate !== ring &&
         candidate.area > ring.area &&
         candidate.polygon.contains(
           flattenPoint(ring.samplePoint.x, ring.samplePoint.y),
         ),
-    ).length
-
-    return containingRingCount % 2 === 0
+    )
+    const outside =
+      fillRule === "evenodd"
+        ? containingRings.length % 2
+        : containingRings.reduce((sum, parent) => sum + parent.winding, 0)
+    const inside = fillRule === "evenodd" ? 1 - outside : outside + ring.winding
+    return {
+      ...ring,
+      outer: outside === 0 && inside !== 0,
+      hole: outside !== 0 && inside === 0,
+    }
   })
+  const outerRings = boundaries.filter((ring) => ring.outer)
 
   return outerRings.map((outerRing) => {
-    const innerRings = rings
+    const innerRings = boundaries
       .filter(
         (ring) =>
-          ring !== outerRing &&
+          ring.hole &&
           ring.area < outerRing.area &&
           outerRing.polygon.contains(
             flattenPoint(ring.samplePoint.x, ring.samplePoint.y),
@@ -135,12 +154,29 @@ export function getTransformedSvgPathRoutes({
   height: number
   transform: Matrix
 }): Point[][] {
+  return getTransformedSvgPaths({ svg, width, height, transform }).flatMap(
+    ({ routes }) => routes,
+  )
+}
+
+function getTransformedSvgPaths({
+  svg,
+  width,
+  height,
+  transform,
+}: {
+  svg: string
+  width: number
+  height: number
+  transform: Matrix
+}): Array<{ routes: Point[][]; fillRule: FillRule }> {
   const viewBox = getSvgViewBox(svg)
   const scaleX = width / viewBox.width
   const scaleY = height / viewBox.height
 
-  return getSvgPathDataList(svg).flatMap((pathData) =>
-    svgPathToPoints(pathData, 0.03).map((pointList) =>
+  return getSvgPathDataList(svg).map(({ pathData, fillRule }) => ({
+    fillRule,
+    routes: svgPathToPoints(pathData, 0.03).map((pointList) =>
       pointList
         .map((point) =>
           applyToPoint(transform, {
@@ -155,7 +191,7 @@ export function getTransformedSvgPathRoutes({
             Math.abs(point.y - points[index - 1].y) > 1e-6,
         ),
     ),
-  )
+  }))
 }
 
 export function ensureClockwise(points: Point[]) {
@@ -250,14 +286,41 @@ function getSvgViewBox(svg: string): {
   return { x: 0, y: 0, width: 1, height: 1 }
 }
 
-function getSvgPathDataList(svg: string): string[] {
-  const pathDataList: string[] = []
-  const pathTagRegex = /<path\b[^>]*>/gi
-
-  for (const pathTag of svg.match(pathTagRegex) ?? []) {
-    const dMatch = pathTag.match(/\bd\s*=\s*(["'])(.*?)\1/i)
-    if (dMatch?.[2]) pathDataList.push(dMatch[2])
+function getSvgPathDataList(
+  svg: string,
+): Array<{ pathData: string; fillRule: FillRule }> {
+  const pathDataList: Array<{ pathData: string; fillRule: FillRule }> = []
+  const document = new DOMParser().parseFromString(svg, SVG_MIMETYPE)
+  function visit(element: Element, inherited: FillRule) {
+    let value = element.getAttribute("fill-rule")?.trim().toLowerCase()
+    let important = false
+    const style = (element.getAttribute("style") ?? "").replace(
+      /\/\*[\s\S]*?\*\//g,
+      " ",
+    )
+    for (const declaration of style.split(";")) {
+      const match = declaration.match(
+        /^\s*fill-rule\s*:\s*(nonzero|evenodd|inherit|initial|unset|revert)\s*(!\s*important)?\s*$/i,
+      )
+      if (match && (!important || match[2])) {
+        value = match[1].toLowerCase()
+        important = Boolean(match[2])
+      }
+    }
+    const fillRule: FillRule =
+      value === "initial"
+        ? "nonzero"
+        : value === "nonzero" || value === "evenodd"
+          ? value
+          : inherited
+    if (element.localName === "path") {
+      const pathData = element.getAttribute("d")
+      if (pathData) pathDataList.push({ pathData, fillRule })
+    }
+    for (let child = element.firstChild; child; child = child.nextSibling) {
+      if (child.nodeType === 1) visit(child as Element, fillRule)
+    }
   }
-
+  if (document.documentElement) visit(document.documentElement, "nonzero")
   return pathDataList
 }
