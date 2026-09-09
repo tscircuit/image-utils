@@ -28,3 +28,15 @@ writing them to disk when needed.
 This package does not expose a `sharp` compatibility subpath. SVG inputs should
 be rasterized to PNG before comparison when visual rather than byte equality is
 required.
+
+## SVG fill geometry
+
+`getSvgBRepShapes` classifies nested, nonintersecting path rings using the SVG
+`nonzero` default or `evenodd`. It reads `fill-rule` presentation attributes and
+simple inline declarations, including inheritance from ancestor elements. Each
+path keeps its own fill rule; `getTransformedSvgPathRoutes` still returns a flat
+list of routes.
+
+Stylesheet selectors, overlapping/self-intersecting contour boolean operations,
+and the existing centroid-based containment limitations are not resolved by this
+fill-rule handling.
