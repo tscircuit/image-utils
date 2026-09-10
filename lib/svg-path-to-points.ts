@@ -126,11 +126,19 @@ export function svgPathToPoints(
       }
 
       case "A": {
+        const rx = segment[1]
+        const ry = segment[2]
         const endX = segment[6]
         const endY = segment[7]
-        const segmentPath = `M ${currentX} ${currentY} A ${segment[1]} ${segment[2]} ${segment[3]} ${segment[4]} ${segment[5]} ${endX} ${endY}`
-        const sampledPoints = sampleCurveSegment(segmentPath, samplesPerUnit)
-        currentPoints.push(...sampledPoints)
+
+        if (Math.abs(rx) < 1e-9 || Math.abs(ry) < 1e-9) {
+          // Degenerate arc: treat as a straight line segment (lineto)
+          currentPoints.push({ x: endX, y: endY })
+        } else {
+          const segmentPath = `M ${currentX} ${currentY} A ${rx} ${ry} ${segment[3]} ${segment[4]} ${segment[5]} ${endX} ${endY}`
+          const sampledPoints = sampleCurveSegment(segmentPath, samplesPerUnit)
+          currentPoints.push(...sampledPoints)
+        }
         currentX = endX
         currentY = endY
         break
