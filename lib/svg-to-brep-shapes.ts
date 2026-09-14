@@ -1,6 +1,6 @@
-import { Polygon, point as flattenPoint } from "@flatten-js/core"
+import { point as flattenPoint, Polygon } from "@flatten-js/core"
 import { applyToPoint, type Matrix } from "transformation-matrix"
-import { svgPathToPoints, type Point } from "./svg-path-to-points"
+import { type Point, svgPathToPoints } from "./svg-path-to-points"
 
 export const SVG_MIMETYPE = "image/svg+xml"
 export const PNG_MIMETYPE = "image/png"
@@ -227,8 +227,8 @@ function getFlattenSignedArea(points: Point[]) {
 }
 
 function getSvgAttribute(tag: string, attrName: string): string | undefined {
-  const attrRegex =
-    /(?:^|\s)([a-zA-Z_:][a-zA-Z0-9.\-_:]*)\s*=\s*(["'])([\s\S]*?)\2/g
+  // Consume every attribute, including Unicode names, before inspecting its name.
+  const attrRegex = /\s+([^\s=/>]+)\s*=\s*(["'])([\s\S]*?)\2/g
   for (const match of tag.matchAll(attrRegex)) {
     if (match[1].toLowerCase() === attrName.toLowerCase()) {
       return match[3]
@@ -243,8 +243,8 @@ function getSvgViewBox(svg: string): {
   width: number
   height: number
 } {
-  const svgTagMatch = svg.match(/<svg\b(?:"[^"]*"|'[^']*'|[^'">])*>/i)
-  const svgTag = svgTagMatch?.[0] ?? svg
+  const svgTagMatch = svg.match(/<svg(?=[\s/>])(?:"[^"]*"|'[^']*'|[^'">])*>/i)
+  const svgTag = svgTagMatch?.[0] ?? ""
   const viewBoxStr = getSvgAttribute(svgTag, "viewBox")
   const viewBox = viewBoxStr
     ?.trim()
@@ -265,7 +265,7 @@ function getSvgViewBox(svg: string): {
 
 function getSvgPathDataList(svg: string): string[] {
   const pathDataList: string[] = []
-  const pathTagRegex = /<path\b(?:"[^"]*"|'[^']*'|[^'">])*>/gi
+  const pathTagRegex = /<path(?=[\s/>])(?:"[^"]*"|'[^']*'|[^'">])*>/gi
 
   for (const pathTag of svg.match(pathTagRegex) ?? []) {
     const dValue = getSvgAttribute(pathTag, "d")
