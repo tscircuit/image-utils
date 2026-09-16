@@ -136,6 +136,10 @@ export function getTransformedSvgPathRoutes({
   transform: Matrix
 }): Point[][] {
   const viewBox = getSvgViewBox(svg)
+  if (viewBox.width === 0 || viewBox.height === 0) {
+    return []
+  }
+
   const scaleX = width / viewBox.width
   const scaleY = height / viewBox.height
 
