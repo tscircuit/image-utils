@@ -2,7 +2,7 @@ import * as colorDiff from "color-diff"
 import { decode, encode } from "fast-png"
 
 const DEFAULT_TOLERANCE = 2.3
-const DEFAULT_HIGHLIGHT = { R: 255, G: 0, B: 255 }
+const DEFAULT_HIGHLIGHT = { R: 255, G: 0, B: 255, A: 255 }
 
 type ImageInput = ArrayBuffer | Uint8Array
 
@@ -10,6 +10,7 @@ type RgbColor = {
   R: number
   G: number
   B: number
+  A: number
 }
 
 type BaseOptions = {
@@ -59,7 +60,28 @@ const areColorsSame = ({
   color1: RgbColor
   color2: RgbColor
 }) => {
-  return color1.R === color2.R && color1.G === color2.G && color1.B === color2.B
+  return (
+    color1.R === color2.R &&
+    color1.G === color2.G &&
+    color1.B === color2.B &&
+    color1.A === color2.A
+  )
+}
+
+// RGBA pixels composite over white before perceptual comparison, matching the
+// blend mode pixelmatch and looks-same use so alpha-only changes are seen as
+// visible differences. The result intentionally omits A: color-diff treats an
+// A field as a 0..1 opacity fraction, so passing a 0..255 byte would corrupt
+// the Lab conversion.
+const blendOverWhite = ({
+  R,
+  G,
+  B,
+  A,
+}: RgbColor): { R: number; G: number; B: number } => {
+  const a = A / 255
+  const blend = (c: number) => 255 + (c - 255) * a
+  return { R: blend(R), G: blend(G), B: blend(B) }
 }
 
 const parsePng = (bytes: Uint8Array): DecodedPng | null => {
@@ -95,6 +117,7 @@ const parsePng = (bytes: Uint8Array): DecodedPng | null => {
           R: rgba[index]!,
           G: rgba[index + 1]!,
           B: rgba[index + 2]!,
+          A: rgba[index + 3]!,
         }
       },
     }
@@ -128,6 +151,7 @@ const parseHexColor = (color?: string): RgbColor => {
     R: Number.parseInt(hex.slice(0, 2), 16),
     G: Number.parseInt(hex.slice(2, 4), 16),
     B: Number.parseInt(hex.slice(4, 6), 16),
+    A: 255,
   }
 }
 
@@ -173,13 +197,13 @@ const makeCIEDE2000Comparator = (tolerance: number): Comparator => {
     }
 
     if (!lab1) {
-      lab1 = colorDiff.rgb_to_lab(data.color1)
+      lab1 = colorDiff.rgb_to_lab(blendOverWhite(data.color1))
       rgbColor1 = data.color1
       labColor1 = lab1
     }
 
     if (!lab2) {
-      lab2 = colorDiff.rgb_to_lab(data.color2)
+      lab2 = colorDiff.rgb_to_lab(blendOverWhite(data.color2))
       rgbColor2 = data.color2
       labColor2 = lab2
     }
@@ -297,11 +321,13 @@ class AntialiasingComparator {
   }
 
   private _brightnessDelta(color1: RgbColor, color2: RgbColor) {
+    const blended1 = blendOverWhite(color1)
+    const blended2 = blendOverWhite(color2)
     return (
-      color1.R * 0.29889531 +
-      color1.G * 0.58662247 +
-      color1.B * 0.11448223 -
-      (color2.R * 0.29889531 + color2.G * 0.58662247 + color2.B * 0.11448223)
+      blended1.R * 0.29889531 +
+      blended1.G * 0.58662247 +
+      blended1.B * 0.11448223 -
+      (blended2.R * 0.29889531 + blended2.G * 0.58662247 + blended2.B * 0.11448223)
     )
   }
 }
@@ -437,6 +463,7 @@ type PreparedOptions = {
   ignoreAntialiasing: boolean
   antialiasingTolerance: number
   pixelRatio?: number
+  percentThreshold: number
 }
 
 type CompareResult = {
@@ -468,6 +495,7 @@ const prepareOptions = (options: BaseOptions = {}): PreparedOptions => {
     ignoreAntialiasing: options.ignoreAntialiasing ?? true,
     antialiasingTolerance: options.antialiasingTolerance ?? 0,
     pixelRatio: options.pixelRatio,
+    percentThreshold: options.percentThreshold ?? 0,
   }
 }
 
@@ -552,7 +580,7 @@ const compare = async (
   }
 
   return {
-    equal: differentPixels === 0,
+    equal: differentPixels <= (options.percentThreshold / 100) * totalPixels,
     differentPixels,
     totalPixels,
   }
