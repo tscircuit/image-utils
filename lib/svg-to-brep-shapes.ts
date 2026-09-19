@@ -226,14 +226,33 @@ function getFlattenSignedArea(points: Point[]) {
   return [...createFlattenPolygon(points).faces][0].signedArea()
 }
 
+function getTagAttributes(tag: string): Map<string, string> {
+  const attributes = new Map<string, string>()
+  const attrRe = /([^\s"'=<>`/]+)\s*=\s*("[^"]*"|'[^']*'|[^\s"'=<>`]+)/g
+  for (const m of tag.matchAll(attrRe)) {
+    let value = m[2]
+    const first = value[0]
+    const last = value[value.length - 1]
+    if (
+      value.length >= 2 &&
+      (first === '"' || first === "'") &&
+      last === first
+    ) {
+      value = value.slice(1, -1)
+    }
+    attributes.set(m[1].toLowerCase(), value)
+  }
+  return attributes
+}
+
 function getSvgViewBox(svg: string): {
   x: number
   y: number
   width: number
   height: number
 } {
-  const viewBoxMatch = svg.match(/\bviewBox\s*=\s*["']([^"']+)["']/i)
-  const viewBox = viewBoxMatch?.[1]
+  const svgTag = svg.match(/<svg\b(?:[^>"']|"[^"]*"|'[^']*')*>/i)?.[0]
+  const viewBox = (svgTag ? getTagAttributes(svgTag).get("viewbox") : undefined)
     ?.trim()
     .split(/[\s,]+/)
     .map(Number)
@@ -252,11 +271,11 @@ function getSvgViewBox(svg: string): {
 
 function getSvgPathDataList(svg: string): string[] {
   const pathDataList: string[] = []
-  const pathTagRegex = /<path\b[^>]*>/gi
+  const pathTagRegex = /<path\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi
 
   for (const pathTag of svg.match(pathTagRegex) ?? []) {
-    const dMatch = pathTag.match(/\bd\s*=\s*(["'])(.*?)\1/i)
-    if (dMatch?.[2]) pathDataList.push(dMatch[2])
+    const d = getTagAttributes(pathTag).get("d")
+    if (d) pathDataList.push(d)
   }
 
   return pathDataList
