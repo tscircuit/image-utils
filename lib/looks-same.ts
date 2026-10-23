@@ -437,6 +437,7 @@ type PreparedOptions = {
   ignoreAntialiasing: boolean
   antialiasingTolerance: number
   pixelRatio?: number
+  percentThreshold?: number
 }
 
 type CompareResult = {
@@ -468,6 +469,7 @@ const prepareOptions = (options: BaseOptions = {}): PreparedOptions => {
     ignoreAntialiasing: options.ignoreAntialiasing ?? true,
     antialiasingTolerance: options.antialiasingTolerance ?? 0,
     pixelRatio: options.pixelRatio,
+    percentThreshold: options.percentThreshold,
   }
 }
 
@@ -551,8 +553,14 @@ const compare = async (
     }
   }
 
+  const percentDifferent = (differentPixels / totalPixels) * 100
+  const equal =
+    options.percentThreshold !== undefined
+      ? percentDifferent <= options.percentThreshold
+      : differentPixels === 0
+
   return {
-    equal: differentPixels === 0,
+    equal,
     differentPixels,
     totalPixels,
   }
