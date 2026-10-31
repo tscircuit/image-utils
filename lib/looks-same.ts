@@ -10,6 +10,7 @@ type RgbColor = {
   R: number
   G: number
   B: number
+  A?: number
 }
 
 type BaseOptions = {
@@ -59,7 +60,16 @@ const areColorsSame = ({
   color1: RgbColor
   color2: RgbColor
 }) => {
-  return color1.R === color2.R && color1.G === color2.G && color1.B === color2.B
+  const a1 = color1.A ?? 255
+  const a2 = color2.A ?? 255
+  if (a1 === 0 && a2 === 0) return true
+
+  return (
+    color1.R === color2.R &&
+    color1.G === color2.G &&
+    color1.B === color2.B &&
+    a1 === a2
+  )
 }
 
 const parsePng = (bytes: Uint8Array): DecodedPng | null => {
@@ -95,6 +105,7 @@ const parsePng = (bytes: Uint8Array): DecodedPng | null => {
           R: rgba[index]!,
           G: rgba[index + 1]!,
           B: rgba[index + 2]!,
+          A: rgba[index + 3]!,
         }
       },
     }
@@ -129,6 +140,37 @@ const parseHexColor = (color?: string): RgbColor => {
     G: Number.parseInt(hex.slice(2, 4), 16),
     B: Number.parseInt(hex.slice(4, 6), 16),
   }
+}
+
+const toLabColor = (color: RgbColor, background = 255) => {
+  const alpha = (color.A ?? 255) / 255
+  if (alpha >= 1) {
+    return colorDiff.rgb_to_lab({ R: color.R, G: color.G, B: color.B })
+  }
+  return colorDiff.rgb_to_lab({
+    R: background + (color.R - background) * alpha,
+    G: background + (color.G - background) * alpha,
+    B: background + (color.B - background) * alpha,
+  })
+}
+
+const isWithinLabTolerance = (
+  lab1: { L: number; a: number; b: number },
+  lab2: { L: number; a: number; b: number },
+  tolerance: number,
+  upperBound: number,
+  lowerBound: number,
+) => {
+  const cie76 = Math.sqrt(
+    (lab1.L - lab2.L) * (lab1.L - lab2.L) +
+      (lab1.a - lab2.a) * (lab1.a - lab2.a) +
+      (lab1.b - lab2.b) * (lab1.b - lab2.b),
+  )
+
+  if (cie76 >= upperBound) return false
+  if (cie76 <= lowerBound) return true
+
+  return colorDiff.diff(lab1, lab2) < tolerance
 }
 
 const makeCIEDE2000Comparator = (tolerance: number): Comparator => {
@@ -173,27 +215,32 @@ const makeCIEDE2000Comparator = (tolerance: number): Comparator => {
     }
 
     if (!lab1) {
-      lab1 = colorDiff.rgb_to_lab(data.color1)
+      lab1 = toLabColor(data.color1, 255)
       rgbColor1 = data.color1
       labColor1 = lab1
     }
 
     if (!lab2) {
-      lab2 = colorDiff.rgb_to_lab(data.color2)
+      lab2 = toLabColor(data.color2, 255)
       rgbColor2 = data.color2
       labColor2 = lab2
     }
 
-    const cie76 = Math.sqrt(
-      (lab1.L - lab2.L) * (lab1.L - lab2.L) +
-        (lab1.a - lab2.a) * (lab1.a - lab2.a) +
-        (lab1.b - lab2.b) * (lab1.b - lab2.b),
-    )
+    if (!isWithinLabTolerance(lab1, lab2, tolerance, upperBound, lowerBound)) {
+      return false
+    }
 
-    if (cie76 >= upperBound) return false
-    if (cie76 <= lowerBound) return true
+    if ((data.color1.A ?? 255) !== (data.color2.A ?? 255)) {
+      return isWithinLabTolerance(
+        toLabColor(data.color1, 0),
+        toLabColor(data.color2, 0),
+        tolerance,
+        upperBound,
+        lowerBound,
+      )
+    }
 
-    return colorDiff.diff(lab1, lab2) < tolerance
+    return true
   }
 }
 
@@ -297,11 +344,13 @@ class AntialiasingComparator {
   }
 
   private _brightnessDelta(color1: RgbColor, color2: RgbColor) {
+    const a1 = (color1.A ?? 255) / 255
+    const a2 = (color2.A ?? 255) / 255
     return (
-      color1.R * 0.29889531 +
-      color1.G * 0.58662247 +
-      color1.B * 0.11448223 -
-      (color2.R * 0.29889531 + color2.G * 0.58662247 + color2.B * 0.11448223)
+      (color1.R * 0.29889531 + color1.G * 0.58662247 + color1.B * 0.11448223) *
+        a1 -
+      (color2.R * 0.29889531 + color2.G * 0.58662247 + color2.B * 0.11448223) *
+        a2
     )
   }
 }
@@ -627,7 +676,7 @@ const createDiff = async ({
         diffData[index] = color1.R
         diffData[index + 1] = color1.G
         diffData[index + 2] = color1.B
-        diffData[index + 3] = 255
+        diffData[index + 3] = color1.A ?? 255
       } else {
         diffData[index] = highlight.R
         diffData[index + 1] = highlight.G
