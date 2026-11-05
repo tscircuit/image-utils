@@ -433,6 +433,7 @@ class IgnoreCaretComparator {
 type PreparedOptions = {
   strict: boolean
   tolerance: number
+  percentThreshold?: number
   ignoreCaret: boolean
   ignoreAntialiasing: boolean
   antialiasingTolerance: number
@@ -468,6 +469,7 @@ const prepareOptions = (options: BaseOptions = {}): PreparedOptions => {
     ignoreAntialiasing: options.ignoreAntialiasing ?? true,
     antialiasingTolerance: options.antialiasingTolerance ?? 0,
     pixelRatio: options.pixelRatio,
+    percentThreshold: options.percentThreshold,
   }
 }
 
@@ -551,8 +553,14 @@ const compare = async (
     }
   }
 
+  const percentDifferent = (differentPixels / totalPixels) * 100
+  const equal =
+    differentPixels === 0 ||
+    (options.percentThreshold !== undefined &&
+      percentDifferent <= options.percentThreshold)
+
   return {
-    equal: differentPixels === 0,
+    equal,
     differentPixels,
     totalPixels,
   }
