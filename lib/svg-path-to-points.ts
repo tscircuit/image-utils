@@ -126,11 +126,17 @@ export function svgPathToPoints(
       }
 
       case "A": {
+        const rx = Math.abs(Number(segment[1]))
+        const ry = Math.abs(Number(segment[2]))
         const endX = segment[6]
         const endY = segment[7]
-        const segmentPath = `M ${currentX} ${currentY} A ${segment[1]} ${segment[2]} ${segment[3]} ${segment[4]} ${segment[5]} ${endX} ${endY}`
-        const sampledPoints = sampleCurveSegment(segmentPath, samplesPerUnit)
-        currentPoints.push(...sampledPoints)
+        if (rx === 0 || ry === 0) {
+          currentPoints.push({ x: endX, y: endY })
+        } else {
+          const segmentPath = `M ${currentX} ${currentY} A ${segment[1]} ${segment[2]} ${segment[3]} ${segment[4]} ${segment[5]} ${endX} ${endY}`
+          const sampledPoints = sampleCurveSegment(segmentPath, samplesPerUnit)
+          currentPoints.push(...sampledPoints)
+        }
         currentX = endX
         currentY = endY
         break
