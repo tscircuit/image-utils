@@ -10,6 +10,7 @@ type RgbColor = {
   R: number
   G: number
   B: number
+  A?: number
 }
 
 type BaseOptions = {
@@ -59,8 +60,18 @@ const areColorsSame = ({
   color1: RgbColor
   color2: RgbColor
 }) => {
-  return color1.R === color2.R && color1.G === color2.G && color1.B === color2.B
+  return (
+    color1.R === color2.R &&
+    color1.G === color2.G &&
+    color1.B === color2.B &&
+    (color1.A ?? 255) === (color2.A ?? 255)
+  )
 }
+
+const toColorDiffInput = (color: RgbColor) =>
+  color.A === undefined || color.A === 255
+    ? { R: color.R, G: color.G, B: color.B }
+    : { R: color.R, G: color.G, B: color.B, A: color.A / 255 }
 
 const parsePng = (bytes: Uint8Array): DecodedPng | null => {
   try {
@@ -95,6 +106,7 @@ const parsePng = (bytes: Uint8Array): DecodedPng | null => {
           R: rgba[index]!,
           G: rgba[index + 1]!,
           B: rgba[index + 2]!,
+          A: rgba[index + 3]!,
         }
       },
     }
@@ -173,13 +185,13 @@ const makeCIEDE2000Comparator = (tolerance: number): Comparator => {
     }
 
     if (!lab1) {
-      lab1 = colorDiff.rgb_to_lab(data.color1)
+      lab1 = colorDiff.rgb_to_lab(toColorDiffInput(data.color1))
       rgbColor1 = data.color1
       labColor1 = lab1
     }
 
     if (!lab2) {
-      lab2 = colorDiff.rgb_to_lab(data.color2)
+      lab2 = colorDiff.rgb_to_lab(toColorDiffInput(data.color2))
       rgbColor2 = data.color2
       labColor2 = lab2
     }
