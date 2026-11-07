@@ -250,13 +250,51 @@ function getSvgViewBox(svg: string): {
   return { x: 0, y: 0, width: 1, height: 1 }
 }
 
+const NON_RENDERED_SVG_CONTAINERS = new Set([
+  "defs",
+  "symbol",
+  "clippath",
+  "mask",
+  "pattern",
+  "marker",
+])
+
 function getSvgPathDataList(svg: string): string[] {
   const pathDataList: string[] = []
-  const pathTagRegex = /<path\b[^>]*>/gi
+  const cleanedSvg = svg
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, "")
+  const tagRegex =
+    /<\/?([a-zA-Z_:][\w:.-]*)(?:\s+(?:[^>"']|"[^"]*"|'[^']*')*)?\s*\/?>/gs
+  const tagStack: string[] = []
 
-  for (const pathTag of svg.match(pathTagRegex) ?? []) {
-    const dMatch = pathTag.match(/\bd\s*=\s*(["'])(.*?)\1/i)
-    if (dMatch?.[2]) pathDataList.push(dMatch[2])
+  for (const match of cleanedSvg.matchAll(tagRegex)) {
+    const fullTag = match[0]
+    const rawTagName = match[1].toLowerCase()
+    const localTagName = rawTagName.split(":").pop() ?? rawTagName
+
+    if (fullTag.startsWith("</")) {
+      for (let i = tagStack.length - 1; i >= 0; i--) {
+        if (tagStack[i] === localTagName) {
+          tagStack.length = i
+          break
+        }
+      }
+      continue
+    }
+
+    const insideNonRenderedContainer =
+      NON_RENDERED_SVG_CONTAINERS.has(localTagName) ||
+      tagStack.some((ancestor) => NON_RENDERED_SVG_CONTAINERS.has(ancestor))
+
+    if (localTagName === "path" && !insideNonRenderedContainer) {
+      const dMatch = fullTag.match(/\bd\s*=\s*(["'])(.*?)\1/is)
+      if (dMatch?.[2]) pathDataList.push(dMatch[2])
+    }
+
+    if (!fullTag.endsWith("/>")) {
+      tagStack.push(localTagName)
+    }
   }
 
   return pathDataList
