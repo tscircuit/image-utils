@@ -250,13 +250,99 @@ function getSvgViewBox(svg: string): {
   return { x: 0, y: 0, width: 1, height: 1 }
 }
 
+function getXmlAttribute(tag: string, attrName: string): string | undefined {
+  const attrRegex = /\s+([^\s=/>]+)\s*=\s*(["'])(.*?)\2/gs
+  for (const match of tag.matchAll(attrRegex)) {
+    if (match[1].toLowerCase() === attrName.toLowerCase()) {
+      return match[3]
+    }
+  }
+  return undefined
+}
+
+function getStyleProperty(
+  styleAttr: string | undefined,
+  propName: string,
+): string | undefined {
+  if (!styleAttr) return undefined
+  let result: string | undefined
+  for (const decl of styleAttr.split(";")) {
+    const colonIndex = decl.indexOf(":")
+    if (colonIndex === -1) continue
+    const name = decl.slice(0, colonIndex).trim().toLowerCase()
+    if (name === propName.toLowerCase()) {
+      const value = decl
+        .slice(colonIndex + 1)
+        .replace(/!important\s*$/i, "")
+        .trim()
+        .toLowerCase()
+      if (value) result = value
+    }
+  }
+  return result
+}
+
 function getSvgPathDataList(svg: string): string[] {
   const pathDataList: string[] = []
-  const pathTagRegex = /<path\b[^>]*>/gi
+  const cleanedSvg = svg
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, "")
+  const tagRegex =
+    /<\/?([a-zA-Z_:][\w:.-]*)(?:\s+(?:[^>"']|"[^"]*"|'[^']*')*)?\s*\/?>/gs
+  const stateStack: Array<{
+    tagName: string
+    displayNone: boolean
+    visibility: string
+  }> = []
 
-  for (const pathTag of svg.match(pathTagRegex) ?? []) {
-    const dMatch = pathTag.match(/\bd\s*=\s*(["'])(.*?)\1/i)
-    if (dMatch?.[2]) pathDataList.push(dMatch[2])
+  for (const match of cleanedSvg.matchAll(tagRegex)) {
+    const fullTag = match[0]
+    const rawTagName = match[1].toLowerCase()
+    const localTagName = rawTagName.split(":").pop() ?? rawTagName
+
+    if (fullTag.startsWith("</")) {
+      for (let i = stateStack.length - 1; i >= 0; i--) {
+        if (stateStack[i].tagName === localTagName) {
+          stateStack.length = i
+          break
+        }
+      }
+      continue
+    }
+
+    const parentState = stateStack[stateStack.length - 1] ?? {
+      displayNone: false,
+      visibility: "visible",
+    }
+
+    const styleAttr = getXmlAttribute(fullTag, "style")
+    const displayValue =
+      getStyleProperty(styleAttr, "display") ??
+      getXmlAttribute(fullTag, "display")?.trim().toLowerCase()
+    const visibilitySpec =
+      getStyleProperty(styleAttr, "visibility") ??
+      getXmlAttribute(fullTag, "visibility")?.trim().toLowerCase()
+
+    const displayNone = parentState.displayNone || displayValue === "none"
+    const visibility =
+      visibilitySpec && visibilitySpec !== "inherit"
+        ? visibilitySpec
+        : parentState.visibility
+
+    if (localTagName === "path") {
+      if (!displayNone && visibility === "visible") {
+        const dValue = getXmlAttribute(fullTag, "d")
+        if (dValue) pathDataList.push(dValue)
+      }
+    }
+
+    if (!fullTag.endsWith("/>")) {
+      stateStack.push({
+        tagName: localTagName,
+        displayNone,
+        visibility,
+      })
+    }
   }
 
   return pathDataList
