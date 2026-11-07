@@ -65,63 +65,67 @@ export function getSvgBRepShapes({
   height: number
   transform: Matrix
 }): BRepShape[] {
-  const rings = getTransformedSvgPathRoutes({ svg, width, height, transform })
-    .map(stripClosingPoint)
-    .filter((route) => route.length >= 3)
-    .map((vertices) => ({
-      vertices,
-      polygon: createFlattenPolygon(vertices),
-      samplePoint: getPolygonCentroid(vertices),
-    }))
-    .map((ring) => ({
-      ...ring,
-      area: ring.polygon.area(),
-    }))
-    .filter((ring) => ring.area > 1e-9)
+  return getTransformedSvgPathRouteGroups({ svg, width, height, transform }).flatMap(
+    (pathRoutes) => {
+      const rings = pathRoutes
+        .map(stripClosingPoint)
+        .filter((route) => route.length >= 3)
+        .map((vertices) => ({
+          vertices,
+          polygon: createFlattenPolygon(vertices),
+          samplePoint: getPolygonCentroid(vertices),
+        }))
+        .map((ring) => ({
+          ...ring,
+          area: ring.polygon.area(),
+        }))
+        .filter((ring) => ring.area > 1e-9)
 
-  const outerRings = rings.filter((ring) => {
-    const containingRingCount = rings.filter(
-      (candidate) =>
-        candidate !== ring &&
-        candidate.area > ring.area &&
-        candidate.polygon.contains(
-          flattenPoint(ring.samplePoint.x, ring.samplePoint.y),
-        ),
-    ).length
+      const outerRings = rings.filter((ring) => {
+        const containingRingCount = rings.filter(
+          (candidate) =>
+            candidate !== ring &&
+            candidate.area > ring.area &&
+            candidate.polygon.contains(
+              flattenPoint(ring.samplePoint.x, ring.samplePoint.y),
+            ),
+        ).length
 
-    return containingRingCount % 2 === 0
-  })
+        return containingRingCount % 2 === 0
+      })
 
-  return outerRings.map((outerRing) => {
-    const innerRings = rings
-      .filter(
-        (ring) =>
-          ring !== outerRing &&
-          ring.area < outerRing.area &&
-          outerRing.polygon.contains(
-            flattenPoint(ring.samplePoint.x, ring.samplePoint.y),
-          ) &&
-          !outerRings.some(
-            (otherOuterRing) =>
-              otherOuterRing !== outerRing &&
-              otherOuterRing.area < outerRing.area &&
-              otherOuterRing.area > ring.area &&
-              otherOuterRing.polygon.contains(
+      return outerRings.map((outerRing) => {
+        const innerRings = rings
+          .filter(
+            (ring) =>
+              ring !== outerRing &&
+              ring.area < outerRing.area &&
+              outerRing.polygon.contains(
                 flattenPoint(ring.samplePoint.x, ring.samplePoint.y),
+              ) &&
+              !outerRings.some(
+                (otherOuterRing) =>
+                  otherOuterRing !== outerRing &&
+                  otherOuterRing.area < outerRing.area &&
+                  otherOuterRing.area > ring.area &&
+                  otherOuterRing.polygon.contains(
+                    flattenPoint(ring.samplePoint.x, ring.samplePoint.y),
+                  ),
               ),
-          ),
-      )
-      .map((ring) => ({
-        vertices: ensureCounterClockwise(ring.vertices),
-      }))
+          )
+          .map((ring) => ({
+            vertices: ensureCounterClockwise(ring.vertices),
+          }))
 
-    return {
-      outer_ring: {
-        vertices: ensureClockwise(outerRing.vertices),
-      },
-      inner_rings: innerRings,
-    }
-  })
+        return {
+          outer_ring: {
+            vertices: ensureClockwise(outerRing.vertices),
+          },
+          inner_rings: innerRings,
+        }
+      })
+    },
+  )
 }
 
 export function getTransformedSvgPathRoutes({
@@ -135,11 +139,30 @@ export function getTransformedSvgPathRoutes({
   height: number
   transform: Matrix
 }): Point[][] {
+  return getTransformedSvgPathRouteGroups({
+    svg,
+    width,
+    height,
+    transform,
+  }).flat()
+}
+
+function getTransformedSvgPathRouteGroups({
+  svg,
+  width,
+  height,
+  transform,
+}: {
+  svg: string
+  width: number
+  height: number
+  transform: Matrix
+}): Point[][][] {
   const viewBox = getSvgViewBox(svg)
   const scaleX = width / viewBox.width
   const scaleY = height / viewBox.height
 
-  return getSvgPathDataList(svg).flatMap((pathData) =>
+  return getSvgPathDataList(svg).map((pathData) =>
     svgPathToPoints(pathData, 0.03).map((pointList) =>
       pointList
         .map((point) =>
