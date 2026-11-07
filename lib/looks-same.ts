@@ -12,6 +12,12 @@ type RgbColor = {
   B: number
 }
 
+type LabColor = {
+  L: number
+  a: number
+  b: number
+}
+
 type BaseOptions = {
   strict?: boolean
   tolerance?: number
@@ -62,6 +68,18 @@ const areColorsSame = ({
   return color1.R === color2.R && color1.G === color2.G && color1.B === color2.B
 }
 
+/**
+ * Convert a 3-channel RGB byte array into a 4-channel RGBA byte array with opaque alpha.
+ */
+const expandRgbToRgba = (source: ArrayLike<number>, rgba: Uint8Array): void => {
+  for (let i = 0, j = 0; i < source.length; i += 3, j += 4) {
+    rgba[j] = source[i]!
+    rgba[j + 1] = source[i + 1]!
+    rgba[j + 2] = source[i + 2]!
+    rgba[j + 3] = 255
+  }
+}
+
 const parsePng = (bytes: Uint8Array): DecodedPng | null => {
   try {
     const png = decode(bytes)
@@ -75,12 +93,7 @@ const parsePng = (bytes: Uint8Array): DecodedPng | null => {
     if (channels === 4) {
       rgba.set(source as Uint8Array)
     } else if (channels === 3) {
-      for (let i = 0, j = 0; i < source.length; i += 3, j += 4) {
-        rgba[j] = source[i]!
-        rgba[j + 1] = source[i + 1]!
-        rgba[j + 2] = source[i + 2]!
-        rgba[j + 3] = 255
-      }
+      expandRgbToRgba(source, rgba)
     } else {
       return null
     }
@@ -120,7 +133,7 @@ const bytesEqual = (bytes1: Uint8Array, bytes2: Uint8Array) => {
 
 const parseHexColor = (color?: string): RgbColor => {
   if (!color) return DEFAULT_HIGHLIGHT
-  const match = /^#?([0-9a-fA-F]{6})$/.exec(color.trim())
+  const match = color.trim().match(/^#?([0-9a-fA-F]{6})$/)
   if (!match) return DEFAULT_HIGHLIGHT
 
   const hex = match[1]
@@ -131,69 +144,120 @@ const parseHexColor = (color?: string): RgbColor => {
   }
 }
 
+/**
+ * Two-slot LAB color cache avoiding redundant RGB-to-LAB conversions on adjacent pixels.
+ */
+class LabColorPairCache {
+  private rgb1: RgbColor | null = null
+  private rgb2: RgbColor | null = null
+  private lab1: LabColor | null = null
+  private lab2: LabColor | null = null
+
+  private findCached(color: RgbColor): LabColor | null {
+    if (this.rgb1 && areColorsSame({ color1: color, color2: this.rgb1 })) {
+      return this.lab1
+    }
+    if (this.rgb2 && areColorsSame({ color1: color, color2: this.rgb2 })) {
+      return this.lab2
+    }
+    return null
+  }
+
+  resolvePair(color1: RgbColor, color2: RgbColor): { lab1: LabColor; lab2: LabColor } {
+    let resolved1 = this.findCached(color1)
+    let resolved2 = this.findCached(color2)
+
+    if (!resolved1) {
+      resolved1 = colorDiff.rgb_to_lab(color1)
+      this.rgb1 = color1
+      this.lab1 = resolved1
+    }
+
+    if (!resolved2) {
+      resolved2 = colorDiff.rgb_to_lab(color2)
+      this.rgb2 = color2
+      this.lab2 = resolved2
+    }
+
+    return { lab1: resolved1, lab2: resolved2 }
+  }
+}
+
+const computeCie76Distance = (lab1: LabColor, lab2: LabColor): number => {
+  const dL = lab1.L - lab2.L
+  const da = lab1.a - lab2.a
+  const db = lab1.b - lab2.b
+  return Math.sqrt(dL * dL + da * da + db * db)
+}
+
 const makeCIEDE2000Comparator = (tolerance: number): Comparator => {
   const upperBound = tolerance * 6.2
   const lowerBound = tolerance * 0.695
-
-  let rgbColor1: RgbColor | null = null
-  let rgbColor2: RgbColor | null = null
-  let labColor1: { L: number; a: number; b: number } | null = null
-  let labColor2: { L: number; a: number; b: number } | null = null
+  const cache = new LabColorPairCache()
 
   return (data) => {
     if (areColorsSame(data)) {
       return true
     }
 
-    let lab1 = null
-    let lab2 = null
-
-    if (
-      rgbColor1 &&
-      areColorsSame({ color1: data.color1, color2: rgbColor1 })
-    ) {
-      lab1 = labColor1
-    } else if (
-      rgbColor2 &&
-      areColorsSame({ color1: data.color1, color2: rgbColor2 })
-    ) {
-      lab1 = labColor2
-    }
-
-    if (
-      rgbColor1 &&
-      areColorsSame({ color1: data.color2, color2: rgbColor1 })
-    ) {
-      lab2 = labColor1
-    } else if (
-      rgbColor2 &&
-      areColorsSame({ color1: data.color2, color2: rgbColor2 })
-    ) {
-      lab2 = labColor2
-    }
-
-    if (!lab1) {
-      lab1 = colorDiff.rgb_to_lab(data.color1)
-      rgbColor1 = data.color1
-      labColor1 = lab1
-    }
-
-    if (!lab2) {
-      lab2 = colorDiff.rgb_to_lab(data.color2)
-      rgbColor2 = data.color2
-      labColor2 = lab2
-    }
-
-    const cie76 = Math.sqrt(
-      (lab1.L - lab2.L) * (lab1.L - lab2.L) +
-        (lab1.a - lab2.a) * (lab1.a - lab2.a) +
-        (lab1.b - lab2.b) * (lab1.b - lab2.b),
-    )
+    const { lab1, lab2 } = cache.resolvePair(data.color1, data.color2)
+    const cie76 = computeCie76Distance(lab1, lab2)
 
     if (cie76 >= upperBound) return false
     if (cie76 <= lowerBound) return true
 
     return colorDiff.diff(lab1, lab2) < tolerance
+  }
+}
+
+interface AntialiasTarget {
+  img1: DecodedPng
+  x1: number
+  y1: number
+  data: PixelCompareInput
+  img2?: DecodedPng
+}
+
+interface NeighborhoodAccumulator {
+  exceededZeroes: boolean
+  zeroes: number
+  positives: number
+  negatives: number
+  min: number
+  max: number
+  minX: number
+  minY: number
+  maxX: number
+  maxY: number
+}
+
+const updateNeighborhoodAccumulator = (
+  acc: NeighborhoodAccumulator,
+  sample: { delta: number; x: number; y: number; brightnessTolerance: number },
+): void => {
+  const { delta, x, y, brightnessTolerance } = sample
+  if (Math.abs(delta) <= brightnessTolerance) {
+    acc.zeroes += 1
+  } else if (delta > brightnessTolerance) {
+    acc.positives += 1
+  } else {
+    acc.negatives += 1
+  }
+
+  if (acc.zeroes > 2) {
+    acc.exceededZeroes = true
+    return
+  }
+
+  if (delta < acc.min) {
+    acc.min = delta
+    acc.minX = x
+    acc.minY = y
+  }
+  if (delta > acc.max) {
+    acc.max = delta
+    acc.maxX = x
+    acc.maxY = y
   }
 }
 
@@ -221,78 +285,93 @@ class AntialiasingComparator {
 
   private _checkIsAntialiased(data: PixelCompareInput) {
     return (
-      this._isAntialiased(this._img2, data.x, data.y, data, this._img1) ||
-      this._isAntialiased(this._img1, data.x, data.y, data, this._img2)
+      this._isAntialiased({
+        img1: this._img2,
+        x1: data.x,
+        y1: data.y,
+        data,
+        img2: this._img1,
+      }) ||
+      this._isAntialiased({
+        img1: this._img1,
+        x1: data.x,
+        y1: data.y,
+        data,
+        img2: this._img2,
+      })
     )
   }
 
-  private _isAntialiased(
-    img1: DecodedPng,
-    x1: number,
-    y1: number,
-    data: PixelCompareInput,
-    img2?: DecodedPng,
-  ): boolean {
+  private _scanNeighborhood(
+    target: AntialiasTarget,
+    brightnessTolerance: number,
+  ): NeighborhoodAccumulator {
+    const { img1, x1, y1, data } = target
     const color1 = img1.getPixel(x1, y1)
     const x0 = Math.max(x1 - 1, 0)
     const y0 = Math.max(y1 - 1, 0)
     const x2 = Math.min(x1 + 1, data.width - 1)
     const y2 = Math.min(y1 + 1, data.height - 1)
 
-    const checkExtremePixels = !img2
-    const brightnessTolerance = checkExtremePixels
-      ? this._brightnessTolerance
-      : 0
-
-    let zeroes = 0
-    let positives = 0
-    let negatives = 0
-    let min = 0
-    let max = 0
-    let minX = 0
-    let minY = 0
-    let maxX = 0
-    let maxY = 0
+    const acc: NeighborhoodAccumulator = {
+      exceededZeroes: false,
+      zeroes: 0,
+      positives: 0,
+      negatives: 0,
+      min: 0,
+      max: 0,
+      minX: 0,
+      minY: 0,
+      maxX: 0,
+      maxY: 0,
+    }
 
     for (let y = y0; y <= y2; y += 1) {
       for (let x = x0; x <= x2; x += 1) {
         if (x === x1 && y === y1) continue
 
         const delta = this._brightnessDelta(img1.getPixel(x, y), color1)
-
-        if (Math.abs(delta) <= brightnessTolerance) {
-          zeroes += 1
-        } else if (delta > brightnessTolerance) {
-          positives += 1
-        } else {
-          negatives += 1
-        }
-
-        if (zeroes > 2) return false
-        if (checkExtremePixels) continue
-
-        if (delta < min) {
-          min = delta
-          minX = x
-          minY = y
-        }
-
-        if (delta > max) {
-          max = delta
-          maxX = x
-          maxY = y
+        updateNeighborhoodAccumulator(acc, {
+          delta,
+          x,
+          y,
+          brightnessTolerance,
+        })
+        if (acc.exceededZeroes) {
+          return acc
         }
       }
     }
 
+    return acc
+  }
+
+  private _isExtremeNeighborNonAntialiased(
+    target: AntialiasTarget,
+    neighborX: number,
+    neighborY: number,
+  ): boolean {
+    const { img1, img2, data } = target
+    return (
+      !this._isAntialiased({ img1, x1: neighborX, y1: neighborY, data }) &&
+      !this._isAntialiased({ img1: img2!, x1: neighborX, y1: neighborY, data })
+    )
+  }
+
+  private _isAntialiased(target: AntialiasTarget): boolean {
+    const checkExtremePixels = !target.img2
+    const brightnessTolerance = checkExtremePixels
+      ? this._brightnessTolerance
+      : 0
+
+    const scan = this._scanNeighborhood(target, brightnessTolerance)
+    if (scan.exceededZeroes) return false
     if (checkExtremePixels) return true
-    if (negatives === 0 || positives === 0) return false
+    if (scan.negatives === 0 || scan.positives === 0) return false
 
     return (
-      (!this._isAntialiased(img1, minX, minY, data) &&
-        !this._isAntialiased(img2!, minX, minY, data)) ||
-      (!this._isAntialiased(img1, maxX, maxY, data) &&
-        !this._isAntialiased(img2!, maxX, maxY, data))
+      this._isExtremeNeighborNonAntialiased(target, scan.minX, scan.minY) ||
+      this._isExtremeNeighborNonAntialiased(target, scan.maxX, scan.maxY)
     )
   }
 
@@ -322,26 +401,23 @@ class IgnoreCaretComparator {
     return this._baseComparator(data) || this._checkIsCaret(data)
   }
 
+  private _isInsideCaretBounds(data: PixelCompareInput): boolean {
+    if (!this.caretTopLeft || !this.caretBottomRight) {
+      return false
+    }
+    const withinX =
+      data.x >= this.caretTopLeft.x && data.x <= this.caretBottomRight.x
+    const withinY =
+      data.y >= this.caretTopLeft.y && data.y <= this.caretBottomRight.y
+    return withinX && withinY
+  }
+
   private _checkIsCaret(data: PixelCompareInput) {
     if (this._state === "caretDetected") {
-      return (
-        this.caretTopLeft !== null &&
-        this.caretBottomRight !== null &&
-        data.x >= this.caretTopLeft.x &&
-        data.x <= this.caretBottomRight.x &&
-        data.y >= this.caretTopLeft.y &&
-        data.y <= this.caretBottomRight.y
-      )
+      return this._isInsideCaretBounds(data)
     }
 
-    if (
-      this.caretTopLeft &&
-      this.caretBottomRight &&
-      data.x >= this.caretTopLeft.x &&
-      data.x <= this.caretBottomRight.x &&
-      data.y >= this.caretTopLeft.y &&
-      data.y <= this.caretBottomRight.y
-    ) {
+    if (this._isInsideCaretBounds(data)) {
       return true
     }
 
@@ -437,12 +513,45 @@ type PreparedOptions = {
   ignoreAntialiasing: boolean
   antialiasingTolerance: number
   pixelRatio?: number
+  percentThreshold?: number
 }
 
 type CompareResult = {
   equal: boolean
   differentPixels?: number
   totalPixels?: number
+}
+
+/**
+ * Validate that a caller-supplied `percentThreshold` is a finite non-negative number.
+ */
+const isValidPercentThreshold = (threshold: number): boolean => {
+  if (!Number.isFinite(threshold)) {
+    return false
+  }
+  return threshold >= 0
+}
+
+/**
+ * Evaluate whether the ratio of differing pixels to total pixels satisfies `percentThreshold`.
+ */
+const isWithinPercentThreshold = ({
+  differentPixels,
+  totalPixels,
+  percentThreshold,
+}: {
+  differentPixels: number
+  totalPixels: number
+  percentThreshold?: number
+}): boolean => {
+  if (percentThreshold === undefined) {
+    return differentPixels === 0
+  }
+  if (totalPixels === 0) {
+    return differentPixels === 0
+  }
+  const diffPercent = (differentPixels / totalPixels) * 100
+  return diffPercent <= percentThreshold
 }
 
 const prepareOptions = (options: BaseOptions = {}): PreparedOptions => {
@@ -454,7 +563,7 @@ const prepareOptions = (options: BaseOptions = {}): PreparedOptions => {
 
   if (
     options.percentThreshold !== undefined &&
-    (!Number.isFinite(options.percentThreshold) || options.percentThreshold < 0)
+    !isValidPercentThreshold(options.percentThreshold)
   ) {
     throw new TypeError(
       'Expected "percentThreshold" to be a non-negative number',
@@ -468,6 +577,7 @@ const prepareOptions = (options: BaseOptions = {}): PreparedOptions => {
     ignoreAntialiasing: options.ignoreAntialiasing ?? true,
     antialiasingTolerance: options.antialiasingTolerance ?? 0,
     pixelRatio: options.pixelRatio,
+    percentThreshold: options.percentThreshold,
   }
 }
 
@@ -501,6 +611,67 @@ const createComparator = (
   return comparator
 }
 
+interface ImageGridContext {
+  reference: DecodedPng
+  current: DecodedPng
+  comparator: Comparator
+  width: number
+  height: number
+  minWidth: number
+  minHeight: number
+}
+
+const buildGridContext = (
+  reference: DecodedPng,
+  current: DecodedPng,
+  options: PreparedOptions,
+): ImageGridContext => ({
+  reference,
+  current,
+  comparator: createComparator(reference, current, options),
+  width: Math.max(reference.width, current.width),
+  height: Math.max(reference.height, current.height),
+  minWidth: Math.min(reference.width, current.width),
+  minHeight: Math.min(reference.height, current.height),
+})
+
+const isGridPixelEqual = (
+  grid: ImageGridContext,
+  coords: { x: number; y: number },
+): boolean => {
+  if (coords.x >= grid.minWidth || coords.y >= grid.minHeight) {
+    return false
+  }
+  const color1 = grid.reference.getPixel(coords.x, coords.y)
+  const color2 = grid.current.getPixel(coords.x, coords.y)
+  return (
+    areColorsSame({ color1, color2 }) ||
+    grid.comparator({
+      color1,
+      color2,
+      img1: grid.reference,
+      img2: grid.current,
+      x: coords.x,
+      y: coords.y,
+      width: grid.width,
+      height: grid.height,
+      minWidth: grid.minWidth,
+      minHeight: grid.minHeight,
+    })
+  )
+}
+
+const writeRgbaPixel = (
+  diffData: Uint8Array,
+  index: number,
+  color: RgbColor,
+): void => {
+  diffData[index] = color.R
+  diffData[index + 1] = color.G
+  diffData[index + 2] = color.B
+  diffData[index + 3] = 255
+}
+
 const compare = async (
   buffer1: Uint8Array,
   buffer2: Uint8Array,
@@ -513,46 +684,24 @@ const compare = async (
     return { equal: bytesEqual(buffer1, buffer2) }
   }
 
-  const comparator = createComparator(reference, current, options)
-  const width = Math.max(reference.width, current.width)
-  const height = Math.max(reference.height, current.height)
-  const minWidth = Math.min(reference.width, current.width)
-  const minHeight = Math.min(reference.height, current.height)
-  const totalPixels = width * height
+  const grid = buildGridContext(reference, current, options)
+  const totalPixels = grid.width * grid.height
   let differentPixels = 0
 
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      if (x >= minWidth || y >= minHeight) {
-        differentPixels += 1
-        continue
-      }
-
-      const color1 = reference.getPixel(x, y)
-      const color2 = current.getPixel(x, y)
-      const same =
-        areColorsSame({ color1, color2 }) ||
-        comparator({
-          color1,
-          color2,
-          img1: reference,
-          img2: current,
-          x,
-          y,
-          width,
-          height,
-          minWidth,
-          minHeight,
-        })
-
-      if (!same) {
+  for (let y = 0; y < grid.height; y += 1) {
+    for (let x = 0; x < grid.width; x += 1) {
+      if (!isGridPixelEqual(grid, { x, y })) {
         differentPixels += 1
       }
     }
   }
 
   return {
-    equal: differentPixels === 0,
+    equal: isWithinPercentThreshold({
+      differentPixels,
+      totalPixels,
+      percentThreshold: options.percentThreshold,
+    }),
     differentPixels,
     totalPixels,
   }
@@ -586,65 +735,27 @@ const createDiff = async ({
     return currentBuffer
   }
 
-  const comparator = createComparator(referencePng, currentPng, prepared)
-  const width = Math.max(referencePng.width, currentPng.width)
-  const height = Math.max(referencePng.height, currentPng.height)
-  const minWidth = Math.min(referencePng.width, currentPng.width)
-  const minHeight = Math.min(referencePng.height, currentPng.height)
+  const grid = buildGridContext(referencePng, currentPng, prepared)
   const highlight = parseHexColor(highlightColor)
-  const diffData = new Uint8Array(width * height * 4)
+  const diffData = new Uint8Array(grid.width * grid.height * 4)
 
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const index = (y * width + x) * 4
-
-      if (x >= minWidth || y >= minHeight) {
-        diffData[index] = highlight.R
-        diffData[index + 1] = highlight.G
-        diffData[index + 2] = highlight.B
-        diffData[index + 3] = 255
-        continue
-      }
-
-      const color1 = referencePng.getPixel(x, y)
-      const color2 = currentPng.getPixel(x, y)
-      const same =
-        areColorsSame({ color1, color2 }) ||
-        comparator({
-          color1,
-          color2,
-          img1: referencePng,
-          img2: currentPng,
-          x,
-          y,
-          width,
-          height,
-          minWidth,
-          minHeight,
-        })
-
-      if (same) {
-        diffData[index] = color1.R
-        diffData[index + 1] = color1.G
-        diffData[index + 2] = color1.B
-        diffData[index + 3] = 255
-      } else {
-        diffData[index] = highlight.R
-        diffData[index + 1] = highlight.G
-        diffData[index + 2] = highlight.B
-        diffData[index + 3] = 255
-      }
+  for (let y = 0; y < grid.height; y += 1) {
+    for (let x = 0; x < grid.width; x += 1) {
+      const index = (y * grid.width + x) * 4
+      const pixelColor = isGridPixelEqual(grid, { x, y })
+        ? referencePng.getPixel(x, y)
+        : highlight
+      writeRgbaPixel(diffData, index, pixelColor)
     }
   }
 
-  const encoded = encode({
-    width,
-    height,
+  return encode({
+    width: grid.width,
+    height: grid.height,
     data: diffData,
     channels: 4,
     depth: 8,
   })
-  return encoded
 }
 
 type LooksSame = typeof looksSameImpl & {
