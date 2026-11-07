@@ -65,35 +65,67 @@ export function getSvgBRepShapes({
   height: number
   transform: Matrix
 }): BRepShape[] {
-  const rings = getTransformedSvgPathRoutes({ svg, width, height, transform })
-    .map(stripClosingPoint)
-    .filter((route) => route.length >= 3)
-    .map((vertices) => ({
-      vertices,
-      polygon: createFlattenPolygon(vertices),
-      samplePoint: getPolygonCentroid(vertices),
+  const rings = getTransformedSvgPathEntries({
+    svg,
+    width,
+    height,
+    transform,
+  })
+    .map(({ vertices: rawVertices, fillRule }) => ({
+      vertices: stripClosingPoint(rawVertices),
+      fillRule,
     }))
-    .map((ring) => ({
-      ...ring,
-      area: ring.polygon.area(),
-    }))
+    .filter((route) => route.vertices.length >= 3)
+    .map(({ vertices, fillRule }) => {
+      const polygon = createFlattenPolygon(vertices)
+      const signedArea = [...polygon.faces][0].signedArea()
+      return {
+        vertices,
+        fillRule,
+        polygon,
+        samplePoint: getPolygonCentroid(vertices),
+        area: polygon.area(),
+        winding: signedArea >= 0 ? 1 : -1,
+      }
+    })
     .filter((ring) => ring.area > 1e-9)
 
-  const outerRings = rings.filter((ring) => {
-    const containingRingCount = rings.filter(
+  const classifiedRings = rings.map((ring) => {
+    const containingRings = rings.filter(
       (candidate) =>
         candidate !== ring &&
         candidate.area > ring.area &&
         candidate.polygon.contains(
           flattenPoint(ring.samplePoint.x, ring.samplePoint.y),
         ),
-    ).length
+    )
 
-    return containingRingCount % 2 === 0
+    if (ring.fillRule === "evenodd") {
+      return {
+        ...ring,
+        isOuterRing: containingRings.length % 2 === 0,
+        isHoleRing: containingRings.length % 2 === 1,
+      }
+    }
+
+    const outsideWinding = containingRings.reduce(
+      (sum, candidate) => sum + candidate.winding,
+      0,
+    )
+    const insideWinding = outsideWinding + ring.winding
+
+    return {
+      ...ring,
+      isOuterRing: outsideWinding === 0 && insideWinding !== 0,
+      isHoleRing: outsideWinding !== 0 && insideWinding === 0,
+    }
   })
 
+  const outerRings = classifiedRings.filter((ring) => ring.isOuterRing)
+  const holeRings = classifiedRings.filter((ring) => ring.isHoleRing)
+
   return outerRings.map((outerRing) => {
-    const innerRings = rings
+    const innerRings = holeRings
       .filter(
         (ring) =>
           ring !== outerRing &&
@@ -135,13 +167,30 @@ export function getTransformedSvgPathRoutes({
   height: number
   transform: Matrix
 }): Point[][] {
+  return getTransformedSvgPathEntries({ svg, width, height, transform }).map(
+    (entry) => entry.vertices,
+  )
+}
+
+function getTransformedSvgPathEntries({
+  svg,
+  width,
+  height,
+  transform,
+}: {
+  svg: string
+  width: number
+  height: number
+  transform: Matrix
+}): Array<{ vertices: Point[]; fillRule: "nonzero" | "evenodd" }> {
   const viewBox = getSvgViewBox(svg)
   const scaleX = width / viewBox.width
   const scaleY = height / viewBox.height
 
-  return getSvgPathDataList(svg).flatMap((pathData) =>
-    svgPathToPoints(pathData, 0.03).map((pointList) =>
-      pointList
+  return getSvgPathDataEntries(svg).flatMap(({ d, fillRule }) =>
+    svgPathToPoints(d, 0.03).map((pointList) => ({
+      fillRule,
+      vertices: pointList
         .map((point) =>
           applyToPoint(transform, {
             x: (point.x - viewBox.x - viewBox.width / 2) * scaleX,
@@ -154,7 +203,7 @@ export function getTransformedSvgPathRoutes({
             Math.abs(point.x - points[index - 1].x) > 1e-6 ||
             Math.abs(point.y - points[index - 1].y) > 1e-6,
         ),
-    ),
+    })),
   )
 }
 
@@ -250,14 +299,90 @@ function getSvgViewBox(svg: string): {
   return { x: 0, y: 0, width: 1, height: 1 }
 }
 
-function getSvgPathDataList(svg: string): string[] {
-  const pathDataList: string[] = []
-  const pathTagRegex = /<path\b[^>]*>/gi
+function getXmlAttribute(tag: string, attrName: string): string | undefined {
+  const attrRegex = /\s+([^\s=/>]+)\s*=\s*(["'])(.*?)\2/gs
+  for (const match of tag.matchAll(attrRegex)) {
+    if (match[1].toLowerCase() === attrName.toLowerCase()) {
+      return match[3]
+    }
+  }
+  return undefined
+}
 
-  for (const pathTag of svg.match(pathTagRegex) ?? []) {
-    const dMatch = pathTag.match(/\bd\s*=\s*(["'])(.*?)\1/i)
-    if (dMatch?.[2]) pathDataList.push(dMatch[2])
+function getStyleProperty(
+  styleAttr: string | undefined,
+  propName: string,
+): string | undefined {
+  if (!styleAttr) return undefined
+  let result: string | undefined
+  for (const decl of styleAttr.split(";")) {
+    const colonIndex = decl.indexOf(":")
+    if (colonIndex === -1) continue
+    const name = decl.slice(0, colonIndex).trim().toLowerCase()
+    if (name === propName.toLowerCase()) {
+      const value = decl
+        .slice(colonIndex + 1)
+        .replace(/!important\s*$/i, "")
+        .trim()
+        .toLowerCase()
+      if (value) result = value
+    }
+  }
+  return result
+}
+
+function getSvgPathDataEntries(
+  svg: string,
+): Array<{ d: string; fillRule: "nonzero" | "evenodd" }> {
+  const entries: Array<{ d: string; fillRule: "nonzero" | "evenodd" }> = []
+  const cleanedSvg = svg
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, "")
+  const tagRegex =
+    /<\/?([a-zA-Z_:][\w:.-]*)(?:\s+(?:[^>"']|"[^"]*"|'[^']*')*)?\s*\/?>/gs
+  const stateStack: Array<{
+    tagName: string
+    fillRule: "nonzero" | "evenodd"
+  }> = []
+
+  for (const match of cleanedSvg.matchAll(tagRegex)) {
+    const fullTag = match[0]
+    const rawTagName = match[1].toLowerCase()
+    const localTagName = rawTagName.split(":").pop() ?? rawTagName
+
+    if (fullTag.startsWith("</")) {
+      for (let i = stateStack.length - 1; i >= 0; i--) {
+        if (stateStack[i].tagName === localTagName) {
+          stateStack.length = i
+          break
+        }
+      }
+      continue
+    }
+
+    const parentFillRule =
+      stateStack[stateStack.length - 1]?.fillRule ?? "nonzero"
+    const styleAttr = getXmlAttribute(fullTag, "style")
+    const rawFillRule =
+      getStyleProperty(styleAttr, "fill-rule") ??
+      getXmlAttribute(fullTag, "fill-rule")?.trim().toLowerCase() ??
+      getXmlAttribute(fullTag, "fillRule")?.trim().toLowerCase()
+    const fillRule: "nonzero" | "evenodd" =
+      rawFillRule === "evenodd"
+        ? "evenodd"
+        : rawFillRule === "nonzero"
+          ? "nonzero"
+          : parentFillRule
+
+    if (localTagName === "path") {
+      const d = getXmlAttribute(fullTag, "d")
+      if (d) entries.push({ d, fillRule })
+    }
+
+    if (!fullTag.endsWith("/>")) {
+      stateStack.push({ tagName: localTagName, fillRule })
+    }
   }
 
-  return pathDataList
+  return entries
 }
