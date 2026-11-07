@@ -1,5 +1,12 @@
 import { Polygon, point as flattenPoint } from "@flatten-js/core"
-import { applyToPoint, type Matrix } from "transformation-matrix"
+import {
+  applyToPoint,
+  compose,
+  fromDefinition,
+  fromTransformAttribute,
+  identity,
+  type Matrix,
+} from "transformation-matrix"
 import { svgPathToPoints, type Point } from "./svg-path-to-points"
 
 export const SVG_MIMETYPE = "image/svg+xml"
@@ -139,15 +146,16 @@ export function getTransformedSvgPathRoutes({
   const scaleX = width / viewBox.width
   const scaleY = height / viewBox.height
 
-  return getSvgPathDataList(svg).flatMap((pathData) =>
-    svgPathToPoints(pathData, 0.03).map((pointList) =>
+  return getSvgPathDataList(svg).flatMap(({ d, elementTransform }) =>
+    svgPathToPoints(d, 0.03).map((pointList) =>
       pointList
-        .map((point) =>
-          applyToPoint(transform, {
-            x: (point.x - viewBox.x - viewBox.width / 2) * scaleX,
-            y: -(point.y - viewBox.y - viewBox.height / 2) * scaleY,
-          }),
-        )
+        .map((point) => {
+          const userPoint = applyToPoint(elementTransform, point)
+          return applyToPoint(transform, {
+            x: (userPoint.x - viewBox.x - viewBox.width / 2) * scaleX,
+            y: -(userPoint.y - viewBox.y - viewBox.height / 2) * scaleY,
+          })
+        })
         .filter(
           (point, index, points) =>
             index === 0 ||
@@ -250,13 +258,62 @@ function getSvgViewBox(svg: string): {
   return { x: 0, y: 0, width: 1, height: 1 }
 }
 
-function getSvgPathDataList(svg: string): string[] {
-  const pathDataList: string[] = []
-  const pathTagRegex = /<path\b[^>]*>/gi
+function parseElementTransform(transformAttr: string | undefined): Matrix {
+  if (!transformAttr?.trim()) return identity()
+  try {
+    const definitions = fromTransformAttribute(transformAttr.trim())
+    return definitions.length > 0
+      ? compose(fromDefinition(definitions))
+      : identity()
+  } catch {
+    return identity()
+  }
+}
 
-  for (const pathTag of svg.match(pathTagRegex) ?? []) {
-    const dMatch = pathTag.match(/\bd\s*=\s*(["'])(.*?)\1/i)
-    if (dMatch?.[2]) pathDataList.push(dMatch[2])
+function getSvgPathDataList(
+  svg: string,
+): Array<{ d: string; elementTransform: Matrix }> {
+  const pathDataList: Array<{ d: string; elementTransform: Matrix }> = []
+  const cleanedSvg = svg
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, "")
+  const tagRegex =
+    /<\/?([a-zA-Z_:][\w:.-]*)(?:\s+(?:[^>"']|"[^"]*"|'[^']*')*)?\s*\/?>/gs
+  const stateStack: Array<{ tagName: string; matrix: Matrix }> = []
+
+  for (const match of cleanedSvg.matchAll(tagRegex)) {
+    const fullTag = match[0]
+    const rawTagName = match[1].toLowerCase()
+    const localTagName = rawTagName.split(":").pop() ?? rawTagName
+
+    if (fullTag.startsWith("</")) {
+      for (let i = stateStack.length - 1; i >= 0; i--) {
+        if (stateStack[i].tagName === localTagName) {
+          stateStack.length = i
+          break
+        }
+      }
+      continue
+    }
+
+    const parentMatrix = stateStack[stateStack.length - 1]?.matrix ?? identity()
+    const transformMatch = fullTag.match(/\btransform\s*=\s*(["'])(.*?)\1/is)
+    const ownMatrix = parseElementTransform(transformMatch?.[2])
+    const cumulativeMatrix = compose(parentMatrix, ownMatrix)
+
+    if (localTagName === "path") {
+      const dMatch = fullTag.match(/\bd\s*=\s*(["'])(.*?)\1/is)
+      if (dMatch?.[2]) {
+        pathDataList.push({
+          d: dMatch[2],
+          elementTransform: cumulativeMatrix,
+        })
+      }
+    }
+
+    if (!fullTag.endsWith("/>")) {
+      stateStack.push({ tagName: localTagName, matrix: cumulativeMatrix })
+    }
   }
 
   return pathDataList
