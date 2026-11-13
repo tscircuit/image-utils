@@ -40,7 +40,11 @@ export async function loadImageSource(imageUrl: string): Promise<{
     )
   }
 
-  const responseMimetype = response.headers.get("content-type")?.split(";")[0]
+  const responseMimetype = response.headers
+    .get("content-type")
+    ?.split(";")[0]
+    ?.trim()
+    .toLowerCase()
   const mimetype =
     responseMimetype && responseMimetype !== "application/octet-stream"
       ? responseMimetype
@@ -170,7 +174,7 @@ function loadDataUrlImageSource(imageUrl: string) {
 
   const metadata = imageUrl.slice("data:".length, commaIndex)
   const encodedData = imageUrl.slice(commaIndex + 1)
-  const mimetype = metadata.split(";")[0] || SVG_MIMETYPE
+  const mimetype = metadata.split(";")[0]?.trim().toLowerCase() || SVG_MIMETYPE
   const text = metadata.includes(";base64")
     ? new TextDecoder().decode(
         Uint8Array.from(atob(encodedData), (char) => char.charCodeAt(0)),
