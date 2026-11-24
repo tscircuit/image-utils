@@ -170,8 +170,11 @@ function loadDataUrlImageSource(imageUrl: string) {
 
   const metadata = imageUrl.slice("data:".length, commaIndex)
   const encodedData = imageUrl.slice(commaIndex + 1)
-  const mimetype = metadata.split(";")[0] || SVG_MIMETYPE
-  const text = metadata.includes(";base64")
+  const base64Marker = /;\s*base64\s*$/i
+  const isBase64 = base64Marker.test(metadata)
+  const mimetype =
+    metadata.replace(base64Marker, "").split(";")[0]?.trim() || SVG_MIMETYPE
+  const text = isBase64
     ? new TextDecoder().decode(
         Uint8Array.from(atob(encodedData), (char) => char.charCodeAt(0)),
       )
